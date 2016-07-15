@@ -91,7 +91,7 @@ with PdfPages(pdf_filename) as pdf:
 
             # Plot with time-varying color
             for i in range(nsamples-1):
-                ax.plot(projection[i:i+2,0], projection[i:i+2,1])
+                ax.plot(projection[i:i+2,0], projection[i:i+2,1], 'o-', markersize=3, linewidth=0.5)
 
             # Title subplot
             plt.title('%d m' % depth, fontsize=9)
