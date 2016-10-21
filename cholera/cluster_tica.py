@@ -78,6 +78,7 @@ with PdfPages(pdf_filename) as pdf:
     for (patient_index, patient) in enumerate(patients):
         # Load patient data
         [samples, features, patient_timeseries] = read_patient_data(patient)
+        print(samples)
         nsamples = len(samples)
         nfeatures = len(features)
         projection = projected_data[patient_index]
@@ -93,13 +94,18 @@ with PdfPages(pdf_filename) as pdf:
 
             # Print eigenvalues
             print('eigenvalues:')
-            print tica.eigenvalues_
+            print(tica.eigenvalues_)
             projection = projection[0] # select out only trajectory
 
             # Plot with time-varying color
-            ax.plot(projection[0,0], projection[0,1], 'v', markersize=5)
+            for i in range(nsamples):
+                if 'diarrhea' in samples[i]:
+                    marker = 'v'
+                else:
+                    marker = 'o'
+                ax.plot(projection[i,0], projection[i,1], marker, markersize=5)
             for i in range(nsamples-1):
-                ax.plot(projection[i:i+2,0], projection[i:i+2,1], 'o-', markersize=3, linewidth=0.5)
+                ax.plot(projection[i:i+2,0], projection[i:i+2,1], '-', markersize=3, linewidth=0.5)
 
             # Title subplot
             plt.title('patient %s' % patient, fontsize=9)
