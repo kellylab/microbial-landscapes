@@ -1,8 +1,12 @@
-# microbial-msm
-Markov state models of microbial ecosystems.
+# Microbial community timeseries analysis
 
-Collaboration with [Libusha Kelly](http://www.einstein.yu.edu/faculty/13827/libusha-kelly/) <libusha.kelly@einstein.yu.edu>
+Analysis of persistent states and state transitions in microbial communities from timeseries and static data.
+
+## Authors
+* [John D. Chodera](http://choderalab.org) `<john.chodera@choderalab.org>`
+* [Libusha Kelly](http://www.einstein.yu.edu/faculty/13827/libusha-kelly/) `<libusha.kelly@einstein.yu.edu>`
 
 ## Manifest
 * `bats/` - microbial sampling from the BATS ocean site
-* `cholera/` - patient recovery after cholera (microbiome)
+* `cholera/` - patient microbiome recovery after cholera infection
+* `cogs/` - static samples from 28 ocean sites
