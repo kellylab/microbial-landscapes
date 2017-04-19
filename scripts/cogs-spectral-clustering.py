@@ -4,4 +4,4 @@ import msmbuilder
 import numpy as np
 
 # Load dataset
-data = np.genfromtxt('BIGRAPHA_COGS.csv', delimiter=',')
+data = np.genfromtxt('../data/BIGRAPHA_COGS.csv', delimiter=',')

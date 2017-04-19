@@ -16,7 +16,7 @@ import seaborn
 import numpy as np
 import pandas as pd
 
-filename = 'BATS_ECOTYPE.txt'
+filename = '../data/bats_orig.txt'
 
 # Load data
 feature_names = ['Abundance_e9312', 'Abundance_eMED4', 'Abundance_NATL', 'Abundancee_SS120', 'Abundancee_9313']
@@ -66,7 +66,7 @@ depths = [1, 10, 20, 40, 120, 140, 160, 180]
 subplot_index = 0 # index of current subplot
 subplot_ny = 2 # number of plots in y direction
 subplot_nx = 4 # number of plots in x direction
-pdf_filename = 'BATS_ECOTYPE-tICA.pdf'
+pdf_filename = '../figures/bats_tica.pdf'
 with PdfPages(pdf_filename) as pdf:
     fig = plt.figure(figsize=(7.5,2.5))
     for (depth, color) in zip(depths, cmap):

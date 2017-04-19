@@ -16,7 +16,7 @@ import seaborn
 import numpy as np
 import pandas as pd
 
-filename = 'BATS_ECOTYPE.txt'
+filename = '../data/bats_orig.txt'
 
 # Load data
 feature_names = ['Abundance_e9312', 'Abundance_eMED4', 'Abundance_NATL', 'Abundancee_SS120', 'Abundancee_9313']
@@ -66,7 +66,7 @@ from matplotlib.pyplot import cm
 cmap = cm.rainbow(np.linspace(0,1,ndepths))
 
 # Make plots
-pdf_filename = 'plots.pdf'
+pdf_filename = '../figures/bats_tica.pdf'
 with PdfPages(pdf_filename) as pdf:
     # Plot individual trajectories
     plt.figure(figsize=(10,10))

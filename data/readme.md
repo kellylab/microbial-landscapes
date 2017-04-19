@@ -1,3 +1,10 @@
+## Manifest
+* `bats_orig.txt` - Bermuda Atlantic Timeseries (BATS)
+* `hot_orig.txt` - Hawaii Ocean Timeseries (HOT)
+* `BIGRAPA_COGS.csv` - length-normalized abundance ocean sampling data
+* `BactNorm.txt`, `EukNorm.txt` - Nahant timeseries
+* `cholera/` - Cholera patient data
+
 # Bermuda Atlantic Timeseries (BATS)
 qPCR (quantitative) data describing the abundance of 5 ecotypes of the globally abundant marine cyanobacterium Prochlorococcus over a 5 year period in the Sargasso Sea .
 
@@ -34,3 +41,14 @@ https://drive.google.com/file/d/0B-b-TCkZLqpyTzAwU0gzdE5VSWM/view
 
 ## Associated publications:
 none yet, paper is in review.
+
+
+# Static microbiome samples at various ocean sites (COG)
+
+All Prochlorococcus and viral gene cluster IDs and their length-normalized abundances at 28 ocean sites.
+
+The first column is the name of the gene cluster (`COG0`)
+
+All other columns are sampling sites, they are named as follows:
+* `BS1D` = bacterial fraction, station 1, deep
+* `PS1S` = phage fraction, station 1, surface

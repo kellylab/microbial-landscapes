@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 def read_patient_data(patient):
-    filename = '%s_gordon.taxa_count.sorted.txt' % patient
+    filename = '../data/cholera/%s_gordon.taxa_count.sorted.txt' % patient
 
     # Load data
     df = pd.read_table(filename, delim_whitespace=True)
@@ -70,7 +70,7 @@ tica = tICA(n_components=n_components, lag_time=lag_time)
 projected_data = tica.fit_transform(data)
 
 # Make plots
-pdf_filename = 'cholera.pdf'
+pdf_filename = '../figures/cholera.pdf'
 subplot_nx = 2
 subplot_ny = 4
 with PdfPages(pdf_filename) as pdf:
