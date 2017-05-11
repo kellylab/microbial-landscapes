@@ -1,0 +1,845 @@
+---
+title: "Decomposition of time scales in microbial time series"
+output:
+  html_notebook: default
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+  pdf_document: default
+---
+
+```{r setup, message=FALSE}
+library(dplyr)
+library(data.table)
+library(cowplot)
+library(ggraph)
+library(igraph)
+# library(dendextend)
+library(Rtsne)
+source("utils.R")
+knitr::opts_chunk$set(
+  fig.path = "decomposition_figs/",
+  fig.keep = "high",
+  dev = c("pdf", "png")
+)
+data.dir <- "../../data/"
+```
+
+# Prochloroccocus
+
+## BATS
+
+```{r bats}
+proc.bats <- fread(paste0(data.dir, "bats_orig.txt"))
+# proc.bats[, year := year - min(year)]
+proc.bats[, cal.month := month]
+proc.bats[, month := month + 12 * (year - min(year))]
+proc.bats <- proc.bats %>% 
+  melt(id.vars = c("year", "month", "depth", "cal.month", "day"), 
+       measure.vars = patterns("Abundance"),
+       value.name = "abundance")
+proc.bats[, abundance := as.numeric(abundance)] 
+setnames(proc.bats, "variable", "ecotype")
+proc.bats[, ecotype := gsub("Abundance", "", ecotype)]
+proc.bats[, ecotype := gsub("_", "", ecotype)]
+bats.alldepths <- proc.bats[, .(mn = mean(abundance, na.rm = TRUE)), 
+                          by = .(month, ecotype)] 
+ecotypes <- unique(bats.alldepths$ecotype)
+# #normalize mean abundances per ecotype
+p1 <- ggplot(bats.alldepths, aes(x = month, y = mn)) +
+  geom_line(aes(group = ecotype, color = ecotype), size = 0.5) +
+  scale_y_log10() +
+  scale_color_discrete(limits = ecotypes) +
+  labs(x = "month", y = "mean\nabundance", color = "ecotype") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) 
+setkey(bats.alldepths, ecotype)
+# spectral analysis per ecotype
+spec <- bats.alldepths %>% 
+  dcast(month ~ ecotype, value.var = "mn") %>% 
+  select(-1) %>% 
+  stats::spectrum(plot = FALSE)
+p2 <- data.table(cbind(spec$freq, spec$spec)) %>% 
+  setnames(c("freq", spec$snames)) %>% 
+  melt(id.vars = "freq", variable.name = "ecotype") %>% 
+  ggplot(aes(x = freq, y = value)) +
+  geom_line(aes(group = ecotype, color = ecotype)) +
+  scale_color_discrete(limits = ecotypes) +
+  labs(x = "frequency (1/cycles per month)",
+       y = "density",
+       color = "ecotype") +
+  scale_y_log10()
+plot_grid(p1, p2, nrow = 2, labels = c("A", "B"), align = "v")
+```
+
+## State clustering
+```{r bats-states}
+months <- unique(proc.bats[, .(month, cal.month, year)])
+months[, year := as.character(year)]
+month.div <- expand.grid(month.i = months$month, month.j = months$month,
+                         stringsAsFactors = FALSE) %>% 
+  as.data.table()
+month.div <- month.div[month.j <= month.i]
+month.div[, ":=" (month.j = as.character(month.j),
+                  month.i = as.character(month.i))]
+# SOME ABUNDANCES ARE < 1 WHICH PRODUCES NEGATIVE LOGS. THAT IS A PROBLEM
+# WHAT DO ABUNDANCES < 1 MEAN? FIND OUT
+# proc.bats[abundance < 1, log.abundance := 0]
+# proc.bats[abundance >= 1, log.abundance := log(abundance)]
+proc.bats <- proc.bats[abundance >= 1]
+proc.bats[, log.abundance := log(abundance + 1)]
+proc.bats[, month := as.character(month)]
+setkey(proc.bats, month)
+month.div[, jsd := {
+  if (month.j == month.i) {
+    0
+  } else {
+    sd <- proc.bats[c(month.i, month.j)]
+    m <- dcast(sd, depth + ecotype ~ month, value.var = "log.abundance", 
+               fun.aggregate = mean)
+    m <- select(m, -depth, -ecotype)
+    m <- as.matrix(m)
+    m[is.na(m)] <- 0
+    genJSD(m)
+  }
+}, by = .(month.i, month.j)]
+month.div <- rbind(month.div, month.div[month.i != month.j, .(
+  month.j = month.i, month.i = month.j, jsd
+)])
+month.div[, distance := sqrt(jsd)]
+```
+Number of months representing each calendar month:
+```{r bats-cal-month-samples}
+proc.bats[, .(month = as.numeric(month), 
+              cal.month = as.character(cal.month),
+              day)] %>% 
+  unique() %>% 
+  mutate(year = as.character(floor(month / 12))) %>% 
+  ggplot(aes(x = cal.month)) +
+  geom_bar(aes(fill = year)) +
+  scale_x_discrete(limits = as.character(1:12))
+```
+
+```{r bats-states-plots,fig.height=6,fig.width=7}
+edges <- cbind(months$month[-length(months$month)], 
+               months$month[-1])
+months[, month := as.character(month)]
+graph <- graph_from_data_frame(edges, directed = FALSE,
+                               vertices = months[, .(id = month, month,
+                                                     cal.month, year)]
+)
+dm <- dcast(month.div, month.i ~ month.j, value.var = "distance")
+rn <- dm[, month.i]
+dm <- as.matrix(dm[, -1])
+rownames(dm) <- rn
+ts.layout <- create_layout_tsne(graph, dm, 1)
+mbreaks <- c(1, 3, 6, 9, 12) # Jan, plus months of solstices + equinoxes
+p1 <- ggraph(ts.layout) +
+  geom_edge_link(arrow = arrow(type = "closed", 
+                               length = unit(5, "points")),
+                 edge_width = 0.2,
+                 end_cap = square(length = 5, unit = "points")
+                 ) +
+  geom_node_point(aes(color = cal.month, shape = year)) +
+  theme_graph(base_family = "Helvetica") +
+  guides(shape = guide_legend(ncol = 2)) +
+  scale_color_gradientn(values = scales::rescale(mbreaks), 
+                        colors = c("blue", "green4", "yellow", "orange", 
+                                   "blue")
+                        ) 
+# clustering
+hc <- hclust(dist(dm))
+dendro <- as.dendrogram(hc)
+setkey(months, month)
+dendro <- dendrapply(dendro, function(d) {
+  if (is.leaf(d)) {
+    labl <- attr(d, "label")
+    attr(d, "nodePar") <- list(month = as.numeric(labl),
+                               cal.month = months[labl, cal.month],
+                               year = months[labl, year]
+    )
+  }
+  d
+})
+dendro <- tree_apply(dendro, function(node, children, depth, tree) {
+  if(!is.leaf(node)) {
+    # browser()
+    cal.month <- mean(sapply(children, function(n) {
+      attr(n, "nodePar")$cal.month
+    }))
+    # attr(node, "cal.month") <- cal.month
+    attr(node, "nodePar") <- append(attr(node, "nodePar"),
+                                    list(cal.month = cal.month))
+  }
+  node
+}, direction = "up")
+layout <- create_layout(dendro, "dendrogram", circular = TRUE)
+p2 <- ggraph(layout) +
+  # geom_edge_link2(aes(color = node.cal.month)) +
+  geom_edge_elbow(aes(color = node2.cal.month)) +
+  scale_edge_color_gradientn(values = scales::rescale(mbreaks), 
+                        colors = c("blue", "green4", "yellow", "orange", 
+                                   "blue")) +
+  theme_graph(base_family = "Helvetica") +
+  geom_node_point(aes(filter = leaf, color = cal.month, shape = year),
+                  size = 1) +
+  scale_color_gradientn(values = scales::rescale(mbreaks), 
+                        colors = c("blue", "green4", "yellow", "orange", 
+                                   "blue")) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1, legend.position = "none")
+plot_grid(p1, p2, nrow = 2, labels = "AUTO")
+```
+A: path layout now done with tSNE.
+2D distances no longer reflect Jensen-Shannon distance, but neighbor adjacency should be more accurate.
+
+We see that spring is quite reproduceable, almost all points clustering
+in the upper left-hand corner, only 2 branches away from root.
+Winter by contrast is all over the place, sometimes clustering with
+late fall, other times with spring.
+It could be that winter has no characteristic state of its own but simply
+represents an intermediate between fall and spring.
+Perhaps it can be thought of as an `unstable intermediate' between the
+other two seasons.
+Fall also spreads out a bit, though there is one 4th-level (root = 0) branch
+around 4-5 o'clock that seems to be mostly fall points.
+Winter and fall do seem to cluster together sometimes (1, 5-6 o'clock).
+Overall, one could argue that the two root-level branches could be 
+characterized as "spring" and "summer," with winter and fall forming
+sub-branches within them. 
+
+## Coarse-graining states
+Let the depth = 1 node ID be the state label of each time point
+```{r bats-states-coarsegrain}
+# graf <- tree_apply(graf, function(node, parent, depth, tree, th = 2) {
+#   if (depth < th) {
+#     state <- NA
+#   } else if (depth == th) {
+#     state <- V(tree)$name[node]
+#   } else if (depth >th) {
+#     state <- V(tree)$state[parent]
+#   }
+#   tree <- set_vertex_attr(tree, "state", node, state)
+#   tree
+# })
+# create a unique ID for each state at depth = 2 and propagate down 
+states <- tree_apply(den_to_igraph(dendro), 
+                     function(node, parent, depth, tree, th = 2) {
+  if (depth < th) {
+    state <- NA
+  } else if (depth == th) {
+    state <- V(tree)$name[node]
+  } else if (depth > th) {
+    state <- V(tree)$state[parent]
+  }
+  tree <- set_vertex_attr(tree, "state", node, state)
+  tree
+})
+# map states to leaves
+states <- data.table(name = V(states)$name,
+                     state = V(states)$state,
+                     leaf = V(states)$leaf,
+                     month = as.character(V(states)$month),
+                     year = V(states)$year,
+                     cal.month = V(states)$cal.month)
+setkey(states, month)
+# propagate states back up through branch points from leaves
+dendro <- tree_apply(dendro, function(node, children, depth, tree) {
+  np <- attr(node, "nodePar")
+  if (is.leaf(node)) {
+    # browser()
+    mo <- as.character(attr(node, "nodePar")$month)
+    # if (mo %in% c("39", "28", "52")) {
+    #   browser()
+    # }
+    state <- states[mo, state]
+  } else {
+    child.states <- unique(sapply(children, function(c) {
+      attr(c, "nodePar")$state
+    })) 
+    if (length(child.states) == 1 & !anyNA(child.states)) {
+      state <- child.states
+    } else {
+      state <- NA
+    }
+  }
+  attr(node, "nodePar") <- append(np, list(state = state))
+  node
+}, direction = "up")
+```
+```{r bats-states-coarsegrain-probability,fig.width=7,fig.height=9}
+states[, month := as.character(month)]
+states[, cal.month := factor(as.character(cal.month), 
+                             levels = as.character(seq(1:12)))]
+p1 <- ggraph(dendro, "dendrogram", circular = TRUE) +
+  geom_edge_elbow(aes(color = node2.state)) +
+  geom_node_point(aes(filter = leaf, color = cal.month, shape = year)) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1) + 
+  scale_color_gradientn(values = scales::rescale(mbreaks),
+                        colors = c("blue", "green4", "yellow", "orange",
+                                   "blue")) +
+  guides(shape = guide_legend(ncol = 2),
+         edge_colour = guide_legend(ncol = 2))
+p2 <- ggplot(states[leaf == TRUE], aes(x = state)) +
+  geom_bar(aes(fill = cal.month))  +
+  guides(fill = guide_legend(ncol = 2))
+states[, month := as.numeric(month)]
+setorder(states, month)
+p3 <- ggplot(states[leaf == TRUE], aes(x = month, y = state)) + 
+  geom_path(aes(group = 0)) + 
+  geom_point(aes(color = cal.month, shape = year)) +
+  theme(legend.position = "bottom")
+  # guides(color = guide_legend(ncol = 2))
+plot_grid(p1, p2, p3, labels = "AUTO", nrow = 3, rel_heights = c(2, 0.8, 1))
+```
+
+
+# Nahant
+```{r nahant-ts, fig.width=7,fig.height=6}
+nahant.bac <- fread(paste0(data.dir, "BactNorm.txt"), header = TRUE)
+nahant.bac <- melt(nahant.bac, id.vars = c("OTU", "ConsensusLineage"), 
+                   variable.name = "day")
+nahant.bac <- nahant.bac[, day := as.numeric(as.character(day))]
+nahant.bac <- nahant.bac[, value := as.numeric(value)]
+# merge OTU counts by consensus lineage
+nahant.bac <- nahant.bac[, .(freq = sum(value)), by = .(ConsensusLineage, day)]
+# parse lineage
+# nothing is mapped to species resolution
+nahant.bac <- nahant.bac[, ConsensusLineage := gsub(";", "", ConsensusLineage)]
+nahant.bac <- nahant.bac[, c("foo", "kingdom", "phylum", "class", "order", "family",
+                             "genus") := tstrsplit(ConsensusLineage, 
+                                                   "[[:alpha:]]__")]
+nahant.bac <- nahant.bac[, foo := NULL]
+# there are way too many classes and finer, plot time series of phyla
+phyla <- nahant.bac[kingdom != "" & phylum != "", .(freq = sum(freq)), 
+           by = .(day, phylum)] 
+phyla %>% 
+  group_by(phylum) %>% 
+  mutate(freq = scales::rescale(freq)) %>% 
+  ggplot(aes(x = day, y = freq)) +
+  theme(strip.text = element_text(size = 10),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+        ) +
+  scale_y_continuous(breaks = c(0, 0.5, 1)) +
+  geom_line(aes(group = phylum)) +
+  facet_wrap(~ phylum, ncol = 4) +
+  labs(y = "frequency (normalized)")
+```
+
+We can look at the spectral density of the phyla time series.
+Phyla with peaks in the low frequencies exhibit slow fluctuations.
+It seems there really are slow and broad-spectrum taxa at this level.
+```{r nahant-phyla-spectra}
+phyla.spec <- phyla %>%
+  dcast(day ~ phylum, value.var = "freq") %>% 
+  select(-day) %>% 
+  stats::spectrum(plot = FALSE)
+phyla.spec <- data.table(cbind(phyla.spec$freq, phyla.spec$spec)) %>% 
+  setnames(c("freq", phyla.spec$snames)) %>% 
+  melt(id.vars = "freq", variable.name = "phylum")
+phyla.spec %>% 
+  group_by(phylum) %>% 
+  mutate(value = value / sum(value)) %>% 
+  ggplot(aes(x = freq, y = phylum)) +
+  labs(x = "frequency (1/day)") +
+  geom_tile(aes(fill = value)) 
+```
+
+```{r nahant-phyla-entropy}
+# entropy of power spectrum per phylum
+library(entropy)
+phyla.ent <- phyla.spec[, .(entropy = entropy(discretize(value, 10), 
+                                              unit = "log2")), 
+                        by = phylum]
+ggplot(phyla.ent, aes(x = entropy)) +
+  guides(fill = guide_legend(ncol = 1)) +
+  geom_histogram(aes(fill = phylum), binwidth = 0.1)
+```
+
+# R there statez?
+
+Are there qualitative coarse-grainable compositional states in the Nahant data?
+```{r nahant-composition-clustering}
+phyla[, day := as.character(day)]
+days <- unique(phyla[, day])
+day.div <- data.table(expand.grid(day.i = days, day.j = days))
+day.div[, ":=" (day.i = as.character(day.i), 
+                           day.j = as.character(day.j))]
+setkey(phyla, day)
+day.div[, jsd := {
+  if (day.i == day.j) {
+    0
+  } else {
+    sd <- phyla[c(day.i, day.j)]
+    sd <- dcast(sd, phylum ~ day, value.var = "freq")
+    m <- as.matrix(sd[, 2:3])
+    d <- genJSD(m)
+    d
+  }
+}, by = .(day.i, day.j)]
+day.div[, distance := sqrt(jsd)]
+```
+
+Layout the samples by Jensen-Shannon distance using `mds` algorithm.
+Color by day so as to see temporal progression.
+Hierarchically cluster by JS distance.
+
+```{r nahant-composition-clustering-plot, fig.height=7, fig.width=7}
+edges <- cbind(days[-length(days)], days[-1])
+graph <- graph_from_data_frame(edges, directed = FALSE,
+                               vertices = data.table(id = days,
+                                                     day = as.numeric(days)))
+dm <- dcast(day.div, day.i ~ day.j, value.var = "distance")
+rn <- dm[, day.i]
+dm <- as.matrix(dm[, -1])
+rownames(dm) <- rn
+# layout <- create_layout(graph, "mds", dist = dm)
+layout <- create_layout_tsne(graph, dm, 1)
+p1 <- ggraph(layout) +
+  geom_edge_link(arrow = arrow(type = "closed", 
+                               length = unit(5, "points")),
+                 edge_width = 0.2,
+                 end_cap = square(length = 5, unit = "points")
+                 ) +
+  geom_node_point(aes(color = day)) +
+  theme_graph(base_family = "Helvetica") +
+  scale_color_distiller(palette = "Spectral") 
+# clustering
+hc <- hclust(dist(dm))
+dendro <- as.dendrogram(hc)
+dendro <- dendrapply(dendro, function(d) {
+  if (is.leaf(d)) {
+    attr(d, "nodePar") <- list(day = as.numeric(attr(d, "label")))
+  }
+  d
+})
+p2 <- ggraph(dendro, "dendrogram") +
+  geom_edge_elbow() +
+  # geom_node_text(aes(filter = leaf, color = day, label = day), angle = 90, size = 2) +
+  geom_node_point(aes(filter = leaf, color = day)) +
+  scale_color_distiller(palette = "Spectral") +
+  theme_graph(base_family = "Helvetica") #+
+  # theme(aspect.ratio = 1)
+plot_grid(p1, p2, nrow = 2, align = "hv", labels = c("A", "B"))
+```
+
+## Statistics of dynamics 
+
+Distribution of daily compositional step sizes.
+The Maxwell-Boltzmann/lognormal shape to the density at $\Delta(t) = 1$ 
+suggests that under this time resolution the change in composition behaves
+like some kind of random walk?
+```{r nahant-day-deltas, fig.width=7,fig.height=6}
+day.div <- day.div[, day.delta := as.numeric(day.j) - as.numeric(day.i)]
+p1 <- ggplot(day.div[day.delta == 1,], aes(x = distance)) +
+  stat_bin(bins = 30) 
+p2 <- ggplot(day.div[day.delta == 1], aes(x = as.numeric(day.i), y = distance)) +
+  geom_point() + 
+  # stat_smooth() + 
+  labs(x = "day i")
+plot_grid(p1, p2, nrow = 2, labels = "AUTO", align = "hv")
+day.div[day.delta > 0] %>% 
+  mutate(group = as.factor(floor(day.delta / 10) * 10),
+         ddelta = as.factor(day.delta %% 10)) %>% 
+  ggplot(aes(x = distance)) +
+  stat_bin(bins = 30, position = "identity") +
+  scale_color_brewer(palette = "Spectral") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, 
+                                   size = 7
+                                   ),
+        axis.text.y = element_text(size = 6)
+        ) +
+  facet_grid(group ~ ddelta, scales = "free_y")
+```
+
+Compositional distance as function of interval.
+This is sort of an autocorrelation spectrum.
+There are no peaks in this 'spectrum' suggesting there are no characteristic
+time scales of periodic behavior.
+```{r nahant-sim-interval, fig.width=7, fig.height=5}
+br <- days[seq(1, length(days), by = 5)]
+ggplot(day.div, aes(x = day.i, y = day.j)) +
+  geom_tile(aes(fill = distance)) +
+  scale_x_discrete(breaks = br) +
+  scale_y_discrete(breaks = br) +
+  theme(aspect.ratio = 1,
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+tl <- day.div[day.delta > 0, .(mn.dist = mean(distance)), by = day.delta]
+p0 <- ggplot(day.div[day.delta > 0], aes(x = day.delta, y = distance)) 
+p1 <- p0 + geom_point(size = 1) + 
+  # stat_smooth(aes(linetype = "mean"))  +
+  geom_line(aes(y = mn.dist, linetype = "mean"), tl, color = "blue", size = 2) +
+  labs(linetype = "", x = "interval (days)")
+p2 <- p0 + stat_bin_2d(binwidth = c(1, 0.01)) + labs(x = "interval (days)")
+plot_grid(p1, p2, nrow = 2, align = "hv", labels = "AUTO")
+# FT of 'autocorrelation' is power spectrum
+spec <- stats::spectrum(ts(data = tl$mn.dist), plot = FALSE)
+data.table(freq = spec$freq, spec = spec$spec) %>% 
+  ggplot(aes(x = freq, y = spec)) +
+  geom_line() +
+  scale_y_log10() 
+```
+
+# Human
+
+## David et al
+```{r,message=FALSE}
+david <- fread(paste0(data.dir, "david/david.otus"), 
+               col.names = c("sample", "otu", "count")
+               )
+# parse subject and timepoints
+david[, c("subject", "day") := tstrsplit(sample, "_")]
+# log transform otu counts
+david[, log.count := log(count + 1)]
+# split by subject
+subjects <- c(A = "A", B = "B")
+# create tables of day-day divergences
+setkey(david, subject)
+david.div <- lapply(subjects, function(subj) {
+  dt <- david[subj]
+  out <- expand.grid(day.i = unique(dt$day),
+                     day.j = unique(dt$day),
+                     stringsAsFactors = FALSE
+                     )
+  out <- as.data.table(out)
+  # keep only upper triangle
+  out <- out[as.numeric(day.i) >= as.numeric(day.j)]
+  return(out)
+}) %>% rbindlist(idcol = "subject")
+# transiently rename column to avoid name conflict
+setnames(david, "subject", "subj")
+setkey(david, day, subj)
+david.div[, jsd := {
+  if (day.i == day.j) {
+    0
+  } else {
+    sd <- david[.(c(day.i, day.j), subject)]
+    m <- dcast(sd, otu ~ day, value.var = "log.count")
+    m <- as.matrix(m[, 2:3])
+    m[is.na(m)] <- 0
+    genJSD(m)
+  }
+}, by = .(subject, day.i, day.j)]
+setnames(david, "subj", "subject") #sigh
+# reciprocal distances
+david.div <- rbind(david.div, david.div[day.i != day.j, .(day.j = day.i, 
+                                                    day.i = day.j,
+                                                    subject, jsd 
+                                                    )]
+)
+david.div[, distance := sqrt(jsd)]
+david.div[, day.delta := as.numeric(day.i) - as.numeric(day.j)]
+```
+```{r david-stepsizes-day}
+# metadata
+events <- data.table(start = c(71, 80, 104, 151), end = c(122, 85, 113, 159),
+                     subject = c("A", "A", "A", "B"),
+                     event = c("travel", "diarrhea", "diarrhea", "Salmonella"))
+david.div[day.delta == 1] %>% 
+  ggplot(aes(x = distance)) +
+  geom_histogram(binwidth = 0.01) +
+  facet_wrap(~ subject, nrow = 2)
+david.div[day.delta == 1] %>% 
+  mutate(day.i = as.numeric(day.i)) %>% 
+  ggplot(aes(x = day.i, y = distance)) +
+  geom_rect(data = events, mapping = aes(xmin = start, xmax = end, fill = event,
+                                         ymin = 0.45, ymax = 1.05), 
+            alpha = 0.5,
+            inherit.aes = FALSE) +
+  geom_point() +
+  facet_wrap(~ subject, nrow = 2)
+```
+
+```{r david-path-plots,fig.width=7,fig.height=8}
+# function to make graph from day-day distance data
+DayDayGraph <- function(dt) {
+  library(ggraph)
+  library(igraph)
+  # get rid of any NA distances (missing days)
+  dt <- dt[!is.na(distance)]
+  # the days for which we actually have data
+  days <- unique(c(dt$day.i, dt$day.j))
+  days <- days[order(as.numeric(days))]
+  # edges between consecutive days
+  edges <- cbind(days[-length(days)], days[-1])
+  # graph structure
+  graph <- graph_from_data_frame(edges, directed = TRUE,
+                                 vertices = data.table(id = days,
+                                                       day = as.numeric(days)))
+  # distance matrix
+  dm <- dcast(dt, day.i ~ day.j, value.var = "distance")
+  rn <- dm[, day.i]
+  dm <- as.matrix(dm[, -1])
+  rownames(dm) <- rn
+  return(list(graph = graph, dm = dm))
+}
+setkey(david.div, subject)
+a.graph <- DayDayGraph(david.div["A"])
+a.layout <- create_layout_tsne(a.graph$graph, a.graph$dm, 0)
+p.path.a <- ggraph(a.layout) +
+  geom_edge_link(arrow = arrow(type = "closed",
+                               length = unit(5, "points")),
+                 edge_width = 0.2,
+                 end_cap = square(length = 5, unit = "points")
+                 ) +
+  geom_node_point(aes(color = day)) +
+  theme_graph(base_family = "Helvetica") +
+  scale_color_distiller(palette = "YlOrRd")
+b.graph <- DayDayGraph(david.div["B"])
+b.layout <- create_layout_tsne(b.graph$graph, b.graph$dm, seed = 1)
+p.path.b <- ggraph(b.layout) +
+  geom_edge_link(arrow = arrow(type = "closed",
+                               length = unit(5, "points")),
+                 edge_width = 0.2,
+                 end_cap = square(length = 5, unit = "points")
+                 ) +
+  geom_node_point(aes(color = day)) +
+  theme_graph(base_family = "Helvetica") +
+  scale_color_distiller(palette = "YlOrRd")
+plot_grid(p.path.a, p.path.b, nrow = 2,
+          # rel_widths = c(3, 2),
+          labels = "AUTO")
+```
+
+Tree representation.
+Color graphs by events:
+```{r david-event-trees,fig.height=9,fig.width=7}
+Dist2Dendro <- function(dm) {
+  hc <- hclust(dist(dm))
+  dendro <- as.dendrogram(hc)
+  dendro <- dendrapply(dendro, function(d) {
+    if (is.leaf(d)) {
+      attr(d, "nodePar") <- list(day = as.numeric(attr(d, "label")))
+    }
+    d
+  })
+  # would be nice to manipulate this as a data.frame but I can't figure it out
+  return(dendro)
+}
+a.dendro <- Dist2Dendro(a.graph$dm)
+a.dendro <- dendrapply(a.dendro, function(d) {
+  if (is.leaf(d)) {
+    day <- attr(d, "nodePar")$day
+    if (day < 71) {
+      attr(d, "nodePar") <- list(day = day, event = "US (pre)")
+    } else if (day >= 71 & day <= 122) {
+      if (day >= 80 & day <= 85) {
+        attr(d, "nodePar") <- list(day = day, event = "travel + diarrhea 1")
+      } else if ((day >= 104 & day <= 113)) {
+        attr(d, "nodePar") <- list(day = day, event = "travel + diarrhea 2")
+      } else {
+        attr(d, "nodePar") <- list(day = day, event = "travel")
+      }
+    } else {
+      attr(d, "nodePar") <- list(day = day, event = "US (post)")
+    }
+  }
+  d
+})
+a.dendro <- tree_apply(a.dendro, function(node, children, depth, tree) {
+  if (!is.leaf(node)) {
+    events <- sapply(children, function(c) {
+      attr(c, "nodePar")$event
+    })
+    events <- unique(events)
+    if (length(events) == 1 & !anyNA(events)) {
+      attr(node, "nodePar") <- append(attr(node, "nodePar"), list(event = events))
+    } else {
+      attr(node, "nodePar") <- append(attr(node, "nodePar"), list(event = NA))
+    }
+  }
+  node
+}, direction = "up")
+p1 <- ggraph(a.dendro, "dendrogram", circular = TRUE) +
+  geom_edge_elbow(aes(color = node2.event)) +
+  geom_node_point(aes(filter = leaf, color = day), size = 0.6) +
+  scale_color_distiller(palette = "YlOrRd") +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+b.dendro <- Dist2Dendro(b.graph$dm)
+b.dendro <- dendrapply(b.dendro, function(d) {
+  if (is.leaf(d)) {
+    day <- attr(d, "nodePar")$day
+    if (day < 151) {
+      attr(d, "nodePar") <- list(day = day, event = "pre-Salmonella")
+    } else if (day >= 151 & day <= 159) {
+      attr(d, "nodePar") <- list(day = day, event = "Salmonella")
+    } else {
+      attr(d, "nodePar") <- list(day = day, event = "post-Salmonella")
+    }
+  }
+  d
+})
+b.dendro <- tree_apply(b.dendro, function(node, children, depth, tree) {
+  if (!is.leaf(node)) {
+    events <- sapply(children, function(c) {
+      attr(c, "nodePar")$event
+    })
+    events <- unique(events)
+    if (length(events) == 1 & !anyNA(events)) {
+      attr(node, "nodePar") <- append(attr(node, "nodePar"), list(event = events))
+    } else {
+      attr(node, "nodePar") <- append(attr(node, "nodePar"), list(event = NA))
+    }
+  }
+  node
+}, direction = "up")
+p2 <- ggraph(b.dendro, "dendrogram", circular = TRUE) +
+  geom_edge_elbow(aes(color = node2.event)) +
+  geom_node_point(aes(filter = leaf, color = day), size = 1) +
+  scale_color_distiller(palette = "YlOrRd") +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+plot_grid(p1, p2, labels = "AUTO", nrow = 2)
+```
+
+Subject A doesn't seem to have a distinct "traveling" composition.
+Indeed it seems the distance between traveling and US compositions doesn't seem noticeably larger than the distance between US compositions.
+Meaning traveling did not destabilize the microbiome any more than baseline fluctuations while living in the US.
+Perhaps this is due to many OTUs remaining stable through the duration of travel.
+
+Subject B shows clear pre- and post-Salmonella states, as reported in the original manuscript.
+Perhaps the post-Salmonella state is separate because of the extinction of cluster 4 (see original paper) during infection, rendering return to the pre-Salmonella state impossible?
+Notably, the first day of Salmonella clusters deep within the pre-Salmonella state, while the last days cluster closer to the post-Salmonella state.
+Salmonella infection may thus represent an unstable intermediate position between the two stable states on the compositional landscape.
+This agrees with the description in the original manuscript of Salmonella infection being a path that rolls up the side of one basin of stability and down into another; clinical symptoms emerge, as determined by the metadata, when the composition is still somewhat similar to the pre-disease state.
+Likewise, the end of infection is not declared until after the composition has begun to converge on its post-infection state.
+
+Perhaps notably, the first Salmonella day clusters closer to some of the earliest pre-Salmonella points than some others that are closer in time.
+Does this mean that, at the beginning of the series, Subject B was actually in a "Salmonella-prone" state, but no infection occurred?
+Or is the perturbation by invading Salmonella so strong that infection onset depends little on the composition?
+In other words, does the cluster around the first Salmonella point represent a relatively unstable region within the pre-infection state, or is it in fact
+equally stable, just not against Salmonella invasion?
+
+## Gordon et al (cholera)
+```{r}
+gordon <- fread(paste0(data.dir, "cholera/gordon.otus"),
+                col.names = c("sample", "otu", "count"))
+gordon[, c("subject", "state", "sample") := tstrsplit(sample, "_")]
+gordon[grep("d", sample) & state == "recovery", time.unit := "day"]
+gordon[!grep("d", sample), time.unit := "hour"]
+gordon[sample == "end", time.unit := "hour"]
+setkey(gordon, time.unit)
+gordon["hour", hour := as.numeric(sample)]
+gordon["day", hour := 24 * as.numeric(sub("d", "", sample))]
+# set end hour to last hour + 1, days to end hour + 24 * days
+gordon[, hour := {
+  maxhr <- max(.SD["hour"][sample != "end"]$hour)
+  endhr <- maxhr + 1
+  hour[sample == "end"] <- endhr
+  hour[time.unit == "day"] <- hour[time.unit == "day"] + endhr
+  hour
+}, by = subject]
+subjects <- unique(gordon$subject)
+setkey(gordon, subject)
+gordon.div <- lapply(subjects, function(subj) {
+  shours <- as.character(unique(gordon[subj, hour]))
+  out <- data.table(expand.grid(ti = shours, tj = shours, subject = subj,
+                     stringsAsFactors = FALSE)
+  )
+  out <- out[ti >= tj]
+  out[, ":=" (ti = as.character(ti), tj = as.character(tj))]
+  out
+}) %>% rbindlist(use.names = TRUE)
+gordon[, log.count := log(count)]
+gordon[, hour := as.character(hour)]
+setkey(gordon, subject, hour)
+gordon.div[ti == tj, jsd := 0]
+# gordon[duplicated(gordon, by = c("subject", "hour", "otu"))]
+gordon.div[ti != tj, jsd := {
+  s <- subject
+  sd <- gordon[.(s, c(ti, tj))]
+  sd
+  m <- dcast(sd, otu ~ hour, value.var = "log.count")
+  m <- as.matrix(m[, 2:3])
+  m[is.na(m)] <- 0
+  genJSD(m)
+}, by = .(subject, ti, tj)]
+gordon.div <- rbind(gordon.div,
+                    gordon.div[as.numeric(ti) != as.numeric(tj), 
+                               .(subject, jsd, tj = ti, ti = tj)]
+                    )
+gordon.div[, distance := sqrt(jsd)]
+# merge metadata
+gordon.div <- merge(gordon.div, unique(gordon[, .(subject, ti = hour, state)]),
+                    by = c("subject", "ti"))
+gordon.div <- merge(gordon.div, unique(gordon[, .(subject, tj = hour, state)]),
+                    by = c("subject", "tj"),
+                    suffixes = c(".i", ".j"))
+```
+
+David-style divergence matrices:
+```{r gordon-div-matrices,fig.width=7,fig.height=7}
+setkey(gordon.div, subject)
+subjects <- sort(subjects)
+names(subjects) <- subjects
+plots <- lapply(subjects, function(subj) {
+  sd <- gordon.div[subj]
+  ts <- as.numeric(unique(sd$ti))
+  lims <- as.character(sort(ts))
+  p <- ggplot(sd, aes(x = ti, y = tj)) +
+    geom_tile(aes(fill = jsd)) +
+    scale_x_discrete(limits = lims) +
+    scale_y_discrete(limits = lims) +
+    theme(aspect.ratio = 1,
+          axis.text = element_blank(),
+          axis.ticks = element_blank())
+})
+plot_grid(plotlist = plots, ncol = 2, labels = names(plots), align = "hv")
+```
+
+Time-lag divergences:
+```{r gordon-lag-jsd}
+plots <- lapply(subjects, function(subj) {
+  sd <- gordon.div[subj]
+  sd[, ":=" (
+    ti = as.numeric(ti),
+    tj = as.numeric(tj)
+  )]
+  sd <- sd[tj > ti]
+  sd[, delta.t := tj - ti]
+  p <- ggplot(sd, aes(x = delta.t, y = jsd)) +
+    geom_point(size = 0.1) +
+    geom_smooth(color = "blue") +
+    scale_x_log10() +
+    labs(x = "lag (hours)")
+  p
+})
+plot_grid(plotlist = plots, align = "hv", labels = names(plots),
+          nrow = 3)
+```
+
+Paths:
+```{r gordon-paths,fig.width=7,fig.height=10}
+setkey(gordon.div, subject)
+setkey(gordon, subject)
+paths <- lapply(subjects, function(subj) {
+  sd <- gordon.div[subj]
+  ts <- as.numeric(unique(sd$ti))
+  ts <- as.character(sort(ts))
+  edges <- cbind(ts[-length(ts)], ts[-1])
+  verts <- gordon[subj, .(id = as.character(hour),
+                          hour = as.numeric(hour), state)] %>% 
+    unique
+  graph <- graph_from_data_frame(edges, directed = TRUE, vertices = verts)
+  dm <- dcast(sd, ti ~ tj, value.var = "distance")
+  rn <- dm[, ti]
+  dm <- as.matrix(dm[, -1])
+  rownames(dm) <- rn
+  # layout <- create_layout_tsne(graph, dm, 1, 5)
+  layout <- create_layout(graph, "mds", dist = dm)
+  p <- ggraph(layout) +
+    geom_edge_link(arrow = arrow(type = "closed", length = unit(2, "points")),
+                   edge_width = 0.2, end_cap = square(length = 2, 
+                                                      unit = "points")) +
+    scale_color_distiller(palette = "YlOrRd", trans = "log10") +
+    geom_node_point(aes(color = hour, shape = state)) +
+    theme_graph(base_family = "Helvetica")
+})
+plot_grid(plotlist = paths, ncol = 2, labels = names(paths))
+```
+
+
+
+
