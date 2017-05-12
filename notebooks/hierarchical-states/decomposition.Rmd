@@ -3,9 +3,9 @@ title: "Decomposition of time scales in microbial time series"
 output:
   html_notebook: default
   html_document:
-    toc: true
+    toc: yes
     toc_depth: 2
-    toc_float: true
+    toc_float: yes
   pdf_document: default
 ---
 
@@ -32,7 +32,6 @@ data.dir <- "../../data/"
 
 ```{r bats}
 proc.bats <- fread(paste0(data.dir, "bats_orig.txt"))
-# proc.bats[, year := year - min(year)]
 proc.bats[, cal.month := month]
 proc.bats[, month := month + 12 * (year - min(year))]
 proc.bats <- proc.bats %>% 
@@ -95,7 +94,8 @@ month.div[, jsd := {
     0
   } else {
     sd <- proc.bats[c(month.i, month.j)]
-    m <- dcast(sd, depth + ecotype ~ month, value.var = "log.abundance", 
+    # m <- dcast(sd, depth + ecotype ~ month, value.var = "log.abundance", 
+    m <- dcast(sd, depth + ecotype ~ month, value.var = "abundance", 
                fun.aggregate = mean)
     m <- select(m, -depth, -ecotype)
     m <- as.matrix(m)
@@ -394,8 +394,8 @@ dm <- dcast(day.div, day.i ~ day.j, value.var = "distance")
 rn <- dm[, day.i]
 dm <- as.matrix(dm[, -1])
 rownames(dm) <- rn
-# layout <- create_layout(graph, "mds", dist = dm)
-layout <- create_layout_tsne(graph, dm, 1)
+layout <- create_layout(graph, "mds", dist = dm)
+# layout <- create_layout_tsne(graph, dm, 1)
 p1 <- ggraph(layout) +
   geom_edge_link(arrow = arrow(type = "closed", 
                                length = unit(5, "points")),
@@ -515,7 +515,8 @@ david.div[, jsd := {
     0
   } else {
     sd <- david[.(c(day.i, day.j), subject)]
-    m <- dcast(sd, otu ~ day, value.var = "log.count")
+    # m <- dcast(sd, otu ~ day, value.var = "log.count")
+    m <- dcast(sd, otu ~ day, value.var = "count")
     m <- as.matrix(m[, 2:3])
     m[is.na(m)] <- 0
     genJSD(m)
@@ -544,7 +545,7 @@ david.div[day.delta == 1] %>%
   mutate(day.i = as.numeric(day.i)) %>% 
   ggplot(aes(x = day.i, y = distance)) +
   geom_rect(data = events, mapping = aes(xmin = start, xmax = end, fill = event,
-                                         ymin = 0.45, ymax = 1.05), 
+                                         ymin = 0.1, ymax = 1.05), 
             alpha = 0.5,
             inherit.aes = FALSE) +
   geom_point() +
@@ -751,7 +752,8 @@ gordon.div[ti != tj, jsd := {
   s <- subject
   sd <- gordon[.(s, c(ti, tj))]
   sd
-  m <- dcast(sd, otu ~ hour, value.var = "log.count")
+  # m <- dcast(sd, otu ~ hour, value.var = "log.count")
+  m <- dcast(sd, otu ~ hour, value.var = "count")
   m <- as.matrix(m[, 2:3])
   m[is.na(m)] <- 0
   genJSD(m)
@@ -811,7 +813,7 @@ plot_grid(plotlist = plots, align = "hv", labels = names(plots),
 ```
 
 Paths:
-```{r gordon-paths,fig.width=7,fig.height=10}
+```{r gordon-paths,fig.width=7,fig.height=8}
 setkey(gordon.div, subject)
 setkey(gordon, subject)
 paths <- lapply(subjects, function(subj) {
@@ -830,16 +832,66 @@ paths <- lapply(subjects, function(subj) {
   # layout <- create_layout_tsne(graph, dm, 1, 5)
   layout <- create_layout(graph, "mds", dist = dm)
   p <- ggraph(layout) +
-    geom_edge_link(arrow = arrow(type = "closed", length = unit(2, "points")),
-                   edge_width = 0.2, end_cap = square(length = 2, 
+    geom_edge_link(arrow = arrow(type = "closed", length = unit(5, "points")),
+                   edge_width = 0.2, end_cap = square(length = 5, 
                                                       unit = "points")) +
-    scale_color_distiller(palette = "YlOrRd", trans = "log10") +
-    geom_node_point(aes(color = hour, shape = state)) +
+    geom_node_point(aes(color = state)) +
     theme_graph(base_family = "Helvetica")
 })
 plot_grid(plotlist = paths, ncol = 2, labels = names(paths))
 ```
 
-
-
+Clustering:
+```{r gordon-state-clusters,fig.width=7,fig.height=10}
+setkey(gordon.div, subject)
+setkey(gordon, subject, hour)
+trees <- lapply(subjects, function(subj) {
+  sd <- gordon.div[subj]
+  sd <- dcast(sd, ti ~ tj, value.var = "distance")
+  rn <- sd[, ti]
+  dm <- as.matrix(sd[, -1])
+  rownames(dm) <- rn
+  dendro <- as.dendrogram(hclust(dist(dm)))
+  # merge time data and state
+  sd[, time.index := frank(as.numeric(ti))]
+  setkey(sd, ti)
+  dendro <- dendrapply(dendro, function(node) {
+    if (is.leaf(node)) {
+      labl <- attr(node, "label")
+      t <- as.numeric(labl)
+      time.index <- as.numeric(sd[labl, time.index])
+      state <- unique(gordon[.(subj, labl), state])
+      attr(node, "nodePar") <- append(attr(node, "nodePar"), 
+                                      list(hour = t, time.index = time.index,
+                                           state = state)
+                                      )
+    }
+    node
+  })
+  # propagate state upwards through branch nodes
+  dendro <- tree_apply(dendro, function(node, tree, depth, children) {
+    if (!is.leaf(node)) {
+      child.states <- sapply(children, function(n) {
+        attr(n, "nodePar")$state
+      }) %>% unique()
+      if (length(child.states) == 1 & !anyNA(child.states)) {
+        state <- child.states
+      } else {
+        state <- NA
+      }
+      attr(node, "nodePar") <- append(attr(node, "nodePar"),
+                                      list(state = state))
+    }
+    node
+  }, direction = "up")
+  # browser()
+  p <- ggraph(dendro, "dendrogram", circular = TRUE) +
+    geom_edge_elbow(aes(color = node2.state)) +
+    geom_node_point(aes(filter = leaf, color = time.index)) +
+    scale_color_distiller(palette = "YlOrRd") +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1, legend.key.height = unit(10, "points"))
+})
+plot_grid(plotlist = trees, ncol = 2, labels = names(trees))
+```
 
