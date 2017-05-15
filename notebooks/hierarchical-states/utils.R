@@ -165,9 +165,10 @@ RadialNudge <- function(layout, dr) {
 
 #' Create ggraph layout using Rtsne
 #'
+#' @param graph the graph to be laid out (igraph)
 #' @param dm distance matrix
 #' @param seed seed the random number generator
-#' @param perplexity 
+#' @param perplexity
 #'
 #' @return layout_ggraph + layout_igraph
 #' @export
@@ -179,8 +180,32 @@ create_layout_tsne <- function(graph, dm, seed = NULL, perplexity = 15) {
   library(igraph)
   set.seed(seed)
   ts <- Rtsne(dm, perplexity = perplexity)
-  ts.layout <- create_layout(graph, "manual", 
+  ts.layout <- create_layout(graph, "manual",
                              node.positions = data.table(x = ts$Y[, 1],
                                                          y = ts$Y[, 2]))
   return(ts.layout)
+}
+
+#' Makes an ggraph layout using non-metric (i.e. rank) multidimensional scaling
+#' metaMDS from the vegan package.
+#' Requires precomputed distance matrix.
+#'
+#' @param graph the graph to be laid out (igraph)
+#' @param dm the distance matrix, must have vertex names in row and col names
+#' @param ... additional arguments to metaMDS
+#'
+#' @return layout_ggraph + layout_igraph
+#' @export
+#'
+#' @examples
+create_layout_nmds <- function(graph, dm, ...) {
+  library(vegan)
+  library(data.table)
+  nmds <- metaMDS(dm, ...)
+  nmds <- data.table(x = nmds[["points"]][, "MDS1"], y = nmds[["points"]][, "MDS2"],
+                     id = rownames(nmds[["points"]]))
+  setkey(nmds, id)
+  nmds <- nmds[V(graph)$name] # make sure coordinates in right order
+  layout <- create_layout(graph, "manual", node.positions = nmds)
+  return(layout)
 }
