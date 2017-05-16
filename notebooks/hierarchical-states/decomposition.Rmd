@@ -396,9 +396,9 @@ dm <- dcast(day.div, day.i ~ day.j, value.var = "distance")
 rn <- dm[, day.i]
 dm <- as.matrix(dm[, -1])
 rownames(dm) <- rn
-# layout <- create_layout(graph, "mds", dist = dm)
+layout <- create_layout(graph, "mds", dist = dm)
 # layout <- create_layout_tsne(graph, dm, 1)
-layout <- create_layout_nmds(graph, dm, trace = 0)
+# layout <- create_layout_nmds(graph, dm, trace = 0)
 p1 <- ggraph(layout) +
   geom_edge_link(arrow = arrow(type = "closed", 
                                length = unit(5, "points")),
@@ -537,29 +537,62 @@ david.div[, day.delta := as.numeric(day.i) - as.numeric(day.j)]
 ```
 ```{r david-stepsizes-day}
 # metadata
-events <- data.table(start = c(71, 80, 104, 151), end = c(122, 85, 113, 159),
-                     subject = c("A", "A", "A", "B"),
-                     event = c("travel", "diarrhea", "diarrhea", "Salmonella"))
+
+events <- data.table(start = c(0, 71, 80, 104, 123, 0, 151, 160 ), 
+                     end =   c(70, 122, 85, 113, Inf, 150, 159, Inf),
+                     subject = c("A", "A", "A", "A", "A", "B", "B", "B"),
+                     event = c("US (pre)", "travel", "diarrhea 1", 
+                               "diarrhea 2", "US (post)", "pre-Salmonella", 
+                               "Salmonella", "post-Salmonella"))
 david.div[day.delta == 1] %>% 
   ggplot(aes(x = distance)) +
   geom_histogram(binwidth = 0.01) +
   facet_wrap(~ subject, nrow = 2)
+setkey(events, event)
 david.div[day.delta == 1] %>% 
   mutate(day.i = as.numeric(day.i)) %>% 
   ggplot(aes(x = day.i, y = distance)) +
-  geom_rect(data = events, mapping = aes(xmin = start, xmax = end, fill = event,
-                                         ymin = 0.1, ymax = 1.05), 
+  geom_rect(data = events[c("travel", "diarrhea 1", "diarrhea 2", "Salmonella")], 
+            mapping = aes(xmin = start, xmax = end, fill = event, ymin = 0.1, 
+                          ymax = 1.05), 
             alpha = 0.5,
             inherit.aes = FALSE) +
   geom_point() +
   facet_wrap(~ subject, nrow = 2)
 ```
 
+Distributions of all distances for all time scales.
+We see that both length distributions are multimodal, indicating at least 2 compositional "length scales."
+We also see that the vast majority of A distances belong to the lowest mode, while the second lowest mode of B is as high as the lowest, indicating that subject B spends a significant amount of time (relative to the length of the entire measurement).
+```{r david-all-dist-distrib,fig.width=5,fig.height=5}
+p0 <- ggplot(david.div, aes(x = distance)) 
+ar <- 3 / 5
+cdf <- p0 + stat_ecdf(aes(color = subject)) + labs(y = "ECDF") +
+  theme(aspect.ratio = ar)
+dens <- p0 + stat_density(aes(fill = subject), alpha = 0.5, 
+                          position = "identity") +
+  theme(aspect.ratio = ar)
+plot_grid(cdf, dens, nrow = 2, align = "v")
+```
+```{r, david-time-vs-distance,fig.width=6,fig.height=5}
+ggplot(david.div[day.delta > 0], aes(x = distance, y = day.delta)) +
+  # geom_point(data = unique(david.div[day.delta > 0], by = c("distance", "day.delta")), 
+  #            size = 0.1) +
+  # stat_density_2d(aes(fill = ..level..), geom = "polygon") +
+  stat_bin_2d() +
+  labs(y = "interval") +
+  facet_wrap(~ subject, nrow = 2)
+```
+
+
 ```{r david-path-plots,fig.width=7,fig.height=8}
-# function to make graph from day-day distance data
-DayDayGraph <- function(dt, metadata = NULL) {
-  library(ggraph)
-  library(igraph)
+setkey(david.div, subject)
+setkey(events, "subject")
+david.subjects <- c("A", "B")
+names(david.subjects) <- david.subjects
+david.graphs <- lapply(david.subjects, function(subj) {
+  dt <- david.div[subj]
+  metadata <- events[subj]
   # get rid of any NA distances (missing days)
   dt <- dt[!is.na(distance)]
   # the days for which we actually have data
@@ -569,23 +602,19 @@ DayDayGraph <- function(dt, metadata = NULL) {
   edges <- cbind(days[-length(days)], days[-1])
   # graph structure
   vertices <- data.table(id = days, day = as.numeric(days))
-  if (!is.null(metadata)) {
-    vertices[, event := sapply(day, function(d, md = metadata) {
-      events <- md[day >= start & day < end, event]
-      if (length(events) > 0) {
-        # events <- md$event[has.event]
-        # browser()
-        events <- unique(events)
-        if (length(events) > 1) {
-          events <- paste(events, collapse = " + ")
-        }
-      } else {
-        # browser()
-        events <- as.character(NA)
+  vertices[, event := sapply(day, function(d, md = metadata) {
+    events <- md[day >= start & day <= end, event]
+    if (length(events) > 0) {
+      events <- unique(events)
+      if (length(events) > 1) {
+        events <- paste(events, collapse = " + ")
       }
-      events
-    }), by = day]
-  }
+    } else {
+      # browser()
+      events <- as.character(NA)
+    }
+    events
+  }), by = day]
   graph <- graph_from_data_frame(edges, directed = TRUE, vertices = vertices)
   # distance matrix
   dm <- dcast(dt, day.i ~ day.j, value.var = "distance")
@@ -593,44 +622,27 @@ DayDayGraph <- function(dt, metadata = NULL) {
   dm <- as.matrix(dm[, -1])
   rownames(dm) <- rn
   return(list(graph = graph, dm = dm))
-}
-setkey(david.div, subject)
-setkey(events, "subject")
-a.graph <- DayDayGraph(david.div["A"], events["A"])
-# a.layout <- create_layout_tsne(a.graph$graph, a.graph$dm, 0)
-# a.layout <- create_layout_nmds(a.graph$graph, a.graph$dm, trymax = 200)
-a.layout <- create_layout(a.graph$graph, "mds", dist = a.graph$dm)
-p.path.a <- ggraph(a.layout) +
-  geom_edge_link(arrow = arrow(type = "closed",
-                               length = unit(5, "points")),
-                 edge_width = 0.2,
-                 end_cap = square(length = 5, unit = "points")
-                 ) +
-  geom_node_point(aes(color = event)) +
-  theme_graph(base_family = "Helvetica") #+
-  # scale_color_distiller(palette = "YlOrRd")
-b.graph <- DayDayGraph(david.div["B"], events["B"])
-# b.layout <- create_layout_tsne(b.graph$graph, b.graph$dm, seed = 1)
-# b.layout <- create_layout_nmds(b.graph$graph, b.graph$dm, trymax = 100)
-b.layout <- create_layout(b.graph$graph, "mds", dist = b.graph$dm)
-p.path.b <- ggraph(b.layout) +
-  geom_edge_link(arrow = arrow(type = "closed",
-                               length = unit(5, "points")),
-                 edge_width = 0.2,
-                 end_cap = square(length = 5, unit = "points")
-                 ) +
-  geom_node_point(aes(color = event)) +
-  theme_graph(base_family = "Helvetica") #+
-  # scale_color_distiller(palette = "YlOrRd")
-plot_grid(p.path.a, p.path.b, nrow = 2,
-          # rel_widths = c(3, 2),
-          labels = "AUTO")
+  }
+  )
+layouts <- lapply(david.graphs, function(x) {create_layout(x$graph, "mds", dist = x$dm)})
+path.plots <- lapply(layouts, function(lo) {
+  ggraph(lo) + 
+    geom_edge_link(arrow = arrow(type = "closed", 
+                                 length = unit(5, "points")),
+      edge_width = 0.2,
+      end_cap = square(length = 5, unit = "points")) +
+    geom_node_point(aes(color = day, shape = event)) +
+    scale_color_distiller(palette = "Spectral") +
+    theme_graph(base_family = "Helvetica")
+})
+plot_grid(plotlist = path.plots, nrow = 2, labels = "AUTO")
 ```
 
 Tree representation.
 Color graphs by events:
 ```{r david-event-trees,fig.height=9,fig.width=7}
-Dist2Dendro <- function(dm) {
+dendros <- lapply(david.graphs, function(x) {
+  dm <- x$dm
   hc <- hclust(dist(dm))
   dendro <- as.dendrogram(hc)
   dendro <- dendrapply(dendro, function(d) {
@@ -642,27 +654,28 @@ Dist2Dendro <- function(dm) {
   # would be nice to manipulate this as a data.frame but I can't figure it out
   return(dendro)
 }
-a.dendro <- Dist2Dendro(a.graph$dm)
-a.dendro <- dendrapply(a.dendro, function(d) {
-  if (is.leaf(d)) {
-    day <- attr(d, "nodePar")$day
-    if (day < 71) {
-      attr(d, "nodePar") <- list(day = day, event = "US (pre)")
-    } else if (day >= 71 & day <= 122) {
-      if (day >= 80 & day <= 85) {
-        attr(d, "nodePar") <- list(day = day, event = "travel + diarrhea 1")
-      } else if ((day >= 104 & day <= 113)) {
-        attr(d, "nodePar") <- list(day = day, event = "travel + diarrhea 2")
+)
+setkey(events, subject)
+dendros <- lapply(david.subjects, function(subj) {
+  dendro <- dendros[[subj]]
+  metadata <- events[subj]
+  dendro <- dendrapply(dendro, function(d) {
+    if (is.leaf(d)) {
+      day <- attr(d, "nodePar")$day
+      ev <- unique(metadata[day >= start & day <= end, event])
+      if (length(ev) > 0) {
+        if (length(ev) > 1) {
+          ev <- paste(ev, collapse = " + ")
+        }
       } else {
-        attr(d, "nodePar") <- list(day = day, event = "travel")
+        ev <- NA
       }
-    } else {
-      attr(d, "nodePar") <- list(day = day, event = "US (post)")
+      attr(d, "nodePar") <- append(attr(d, "nodePar"), list(event = ev))
     }
-  }
-  d
-})
-a.dendro <- tree_apply(a.dendro, function(node, children, depth, tree) {
+    d
+  })
+  # propagate metadata back up the tree
+  dendro <- tree_apply(dendro, function(node, children, depth, tree) {
   if (!is.leaf(node)) {
     events <- sapply(children, function(c) {
       attr(c, "nodePar")$event
@@ -675,48 +688,18 @@ a.dendro <- tree_apply(a.dendro, function(node, children, depth, tree) {
     }
   }
   node
-}, direction = "up")
-p1 <- ggraph(a.dendro, "dendrogram", circular = TRUE) +
-  geom_edge_elbow(aes(color = node2.event)) +
-  geom_node_point(aes(filter = leaf, color = day), size = 0.6) +
-  scale_color_distiller(palette = "YlOrRd") +
-  theme_graph(base_family = "Helvetica") +
-  theme(aspect.ratio = 1)
-b.dendro <- Dist2Dendro(b.graph$dm)
-b.dendro <- dendrapply(b.dendro, function(d) {
-  if (is.leaf(d)) {
-    day <- attr(d, "nodePar")$day
-    if (day < 151) {
-      attr(d, "nodePar") <- list(day = day, event = "pre-Salmonella")
-    } else if (day >= 151 & day <= 159) {
-      attr(d, "nodePar") <- list(day = day, event = "Salmonella")
-    } else {
-      attr(d, "nodePar") <- list(day = day, event = "post-Salmonella")
-    }
-  }
-  d
+  }, direction = "up")
+  dendro
 })
-b.dendro <- tree_apply(b.dendro, function(node, children, depth, tree) {
-  if (!is.leaf(node)) {
-    events <- sapply(children, function(c) {
-      attr(c, "nodePar")$event
-    })
-    events <- unique(events)
-    if (length(events) == 1 & !anyNA(events)) {
-      attr(node, "nodePar") <- append(attr(node, "nodePar"), list(event = events))
-    } else {
-      attr(node, "nodePar") <- append(attr(node, "nodePar"), list(event = NA))
-    }
-  }
-  node
-}, direction = "up")
-p2 <- ggraph(b.dendro, "dendrogram", circular = TRUE) +
-  geom_edge_elbow(aes(color = node2.event)) +
-  geom_node_point(aes(filter = leaf, color = day), size = 1) +
-  scale_color_distiller(palette = "YlOrRd") +
-  theme_graph(base_family = "Helvetica") +
-  theme(aspect.ratio = 1)
-plot_grid(p1, p2, labels = "AUTO", nrow = 2)
+dendro.plots <- lapply(dendros, function(dend) {
+  ggraph(dend, "dendrogram", circular = TRUE) +
+    geom_edge_elbow(aes(color = node2.event)) +
+    geom_node_point(aes(filter = leaf, color = day), size = 0.6) +
+    scale_color_distiller(palette = "Spectral") +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1)
+})
+plot_grid(plotlist = dendro.plots, nrow = 2, labels = "AUTO")
 ```
 
 Subject A doesn't seem to have a distinct "traveling" composition.
@@ -817,14 +800,10 @@ plot_grid(plotlist = plots, ncol = 2, labels = names(plots), align = "hv")
 
 Time-lag divergences:
 ```{r gordon-lag-jsd}
+gordon.div[, delta.t := as.numeric(tj) - as.numeric(ti)]
 plots <- lapply(subjects, function(subj) {
   sd <- gordon.div[subj]
-  sd[, ":=" (
-    ti = as.numeric(ti),
-    tj = as.numeric(tj)
-  )]
-  sd <- sd[tj > ti]
-  sd[, delta.t := tj - ti]
+  sd <- sd[delta.t > 0]
   p <- ggplot(sd, aes(x = delta.t, y = jsd)) +
     geom_point(size = 0.1) +
     geom_smooth(color = "blue") +
@@ -834,6 +813,30 @@ plots <- lapply(subjects, function(subj) {
 })
 plot_grid(plotlist = plots, align = "hv", labels = names(plots),
           nrow = 3)
+```
+
+```{r gordon-dist-distrib}
+gordon.div[, state := {
+  if (state.i == state.j) state.i
+  else "cross"
+}, by = .(state.i, state.j)]  
+p0 <- gordon.div[delta.t > 0] %>% 
+  .[, state := {
+    if (state.i == state.j) state.i
+    else "cross"
+  }, by = .(state.i, state.j)] %>% 
+  ggplot(aes(x = distance))
+cdf <- p0 + stat_ecdf(aes(color = state)) + facet_wrap(~ subject, nrow = 1) + 
+  labs(y = "ECDF") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+# dens <- p0 + stat_bin(aes(y = ..ncount.., fill = state), position = "dodge",
+#                       bins = 10) 
+dens <- p0 + stat_density(aes(fill = state), alpha = 0.3,
+                          position = "identity")
+dens <- dens +
+  facet_wrap(~ subject, nrow = 1) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+plot_grid(cdf, dens, nrow = 2, align = "v")
 ```
 
 Paths:
