@@ -724,18 +724,18 @@ equally stable, just not against Salmonella invasion?
 ```{r}
 gordon <- fread(paste0(data.dir, "cholera/gordon.otus"),
                 col.names = c("sample", "otu", "count"))
-gordon[, c("subject", "state", "sample") := tstrsplit(sample, "_")]
-gordon[grep("d", sample) & state == "recovery", time.unit := "day"]
-gordon[!grep("d", sample), time.unit := "hour"]
-gordon[sample == "end", time.unit := "hour"]
+gordon[, c("subject", "state", "id") := tstrsplit(sample, "_")]
+gordon[grep("d", id) & state == "recovery", time.unit := "day"]
+gordon[!grep("d", id), time.unit := "hour"]
+gordon[id == "end", time.unit := "hour"]
 setkey(gordon, time.unit)
-gordon["hour", hour := as.numeric(sample)]
-gordon["day", hour := 24 * as.numeric(sub("d", "", sample))]
+gordon["hour", hour := as.numeric(id)]
+gordon["day", hour := 24 * as.numeric(sub("d", "", id))]
 # set end hour to last hour + 1, days to end hour + 24 * days
 gordon[, hour := {
-  maxhr <- max(.SD["hour"][sample != "end"]$hour)
+  maxhr <- max(.SD["hour"][id != "end"]$hour)
   endhr <- maxhr + 1
-  hour[sample == "end"] <- endhr
+  hour[id == "end"] <- endhr
   hour[time.unit == "day"] <- hour[time.unit == "day"] + endhr
   hour
 }, by = subject]
