@@ -724,70 +724,83 @@ equally stable, just not against Salmonella invasion?
 ```{r}
 gordon <- fread(paste0(data.dir, "cholera/gordon.otus"),
                 col.names = c("sample", "otu", "count"))
-gordon[, c("subject", "state", "id") := tstrsplit(sample, "_")]
-gordon[grep("d", id) & state == "recovery", time.unit := "day"]
-gordon[!grep("d", id), time.unit := "hour"]
-gordon[id == "end", time.unit := "hour"]
-setkey(gordon, time.unit)
-gordon["hour", hour := as.numeric(id)]
-gordon["day", hour := 24 * as.numeric(sub("d", "", id))]
+# extract sample info
+gordon.samples <- unique(gordon[, .(sample)])
+# create a dummy 'sample index' to help remove reciprocal sample pairs later 
+gordon.samples[, idx := 1:.N]
+gordon.samples[, c("subject", "state", "id") := tstrsplit(sample, "_")]
+gordon.samples[grep("d", id) & state == "recovery", time.unit := "day"]
+gordon.samples[!grep("d", id), time.unit := "hour"]
+gordon.samples[id == "end", time.unit := "hour"]
+setkey(gordon.samples, time.unit)
+gordon.samples["hour", hour := as.numeric(id)]
+gordon.samples["day", hour := 24 * as.numeric(sub("d", "", id))]
+subjects <- unique(gordon.samples$subject)
 # set end hour to last hour + 1, days to end hour + 24 * days
-gordon[, hour := {
+gordon.samples[, hour := {
   maxhr <- max(.SD["hour"][id != "end"]$hour)
   endhr <- maxhr + 1
   hour[id == "end"] <- endhr
   hour[time.unit == "day"] <- hour[time.unit == "day"] + endhr
   hour
 }, by = subject]
-subjects <- unique(gordon$subject)
-setkey(gordon, subject)
-gordon.div <- lapply(subjects, function(subj) {
-  shours <- as.character(unique(gordon[subj, hour]))
-  out <- data.table(expand.grid(ti = shours, tj = shours, subject = subj,
-                     stringsAsFactors = FALSE)
-  )
-  out <- out[ti >= tj]
-  out[, ":=" (ti = as.character(ti), tj = as.character(tj))]
-  out
-}) %>% rbindlist(use.names = TRUE)
-gordon[, log.count := log(count)]
-gordon[, hour := as.character(hour)]
-setkey(gordon, subject, hour)
-gordon.div[ti == tj, jsd := 0]
-# gordon[duplicated(gordon, by = c("subject", "hour", "otu"))]
-gordon.div[ti != tj, jsd := {
-  s <- subject
-  sd <- gordon[.(s, c(ti, tj))]
-  sd
-  # m <- dcast(sd, otu ~ hour, value.var = "log.count")
-  m <- dcast(sd, otu ~ hour, value.var = "count")
-  m <- as.matrix(m[, 2:3])
-  m[is.na(m)] <- 0
-  genJSD(m)
-}, by = .(subject, ti, tj)]
-gordon.div <- rbind(gordon.div,
-                    gordon.div[as.numeric(ti) != as.numeric(tj), 
-                               .(subject, jsd, tj = ti, ti = tj)]
+# all samples vs all samples
+gordon.div <- data.table(expand.grid(sample.i = gordon.samples$sample,
+                                     sample.j = gordon.samples$sample)
+                         )
+# merge sample info
+gordon.div <- merge(gordon.div, gordon.samples, by.x = "sample.i", 
+                    by.y = "sample"
                     )
+gordon.div <- merge(gordon.div, gordon.samples, by.x = "sample.j", 
+                    by.y = "sample", suffixes = c(".i", ".j")
+                    )
+# remove inverse pairings
+gordon.div <- gordon.div[idx.j >= idx.i]
+# remove dummy variable
+gordon.div[, ":=" (idx.i = NULL, idx.j = NULL)]
+gordon[, log.count := log(count)]
+gordon
+setkey(gordon, sample)
+gordon.div[, jsd := {
+  if (sample.i == sample.j) {
+    0
+  } else{
+    si <- sample.i
+    sj <- sample.j
+    sd <- gordon[c(si, sj)]
+    m <- dcast(sd, otu ~ sample, value.var = "count")
+    m <- as.matrix(m[, 2:3])
+    m[is.na(m)] <- 0
+    genJSD(m)
+  }
+}, by = .(sample.i, sample.j)]
+inv <- gordon.div[sample.i != sample.j]
+setnames(inv, names(inv), sapply(names(inv), function(x) {
+  if (grepl("\\.i", x)) {
+    gsub("\\.i", "\\.j", x)
+  } else if (grepl("\\.j", x)) {
+    gsub("\\.j", "\\.i", x)
+  } else {
+    x
+  }
+}))
+gordon.div <- rbind(gordon.div, inv)
 gordon.div[, distance := sqrt(jsd)]
-# merge metadata
-gordon.div <- merge(gordon.div, unique(gordon[, .(subject, ti = hour, state)]),
-                    by = c("subject", "ti"))
-gordon.div <- merge(gordon.div, unique(gordon[, .(subject, tj = hour, state)]),
-                    by = c("subject", "tj"),
-                    suffixes = c(".i", ".j"))
+gordon.div
 ```
 
 David-style divergence matrices:
 ```{r gordon-div-matrices,fig.width=7,fig.height=7}
-setkey(gordon.div, subject)
+setkey(gordon.div, subject.i, subject.j)
 subjects <- sort(subjects)
 names(subjects) <- subjects
+gordon.div[, ":=" (hour.i = as.character(hour.i), hour.j = as.character(hour.j))]
 plots <- lapply(subjects, function(subj) {
-  sd <- gordon.div[subj]
-  ts <- as.numeric(unique(sd$ti))
+  sd <- gordon.div[.(subj, subj)]
+  ts <- as.numeric(unique(sd$hour.i))
   lims <- as.character(sort(ts))
-  p <- ggplot(sd, aes(x = ti, y = tj)) +
+  p <- ggplot(sd, aes(x = hour.i, y = hour.j)) +
     geom_tile(aes(fill = jsd)) +
     scale_x_discrete(limits = lims) +
     scale_y_discrete(limits = lims) +
@@ -800,9 +813,9 @@ plot_grid(plotlist = plots, ncol = 2, labels = names(plots), align = "hv")
 
 Time-lag divergences:
 ```{r gordon-lag-jsd}
-gordon.div[, delta.t := as.numeric(tj) - as.numeric(ti)]
+gordon.div[, delta.t := as.numeric(hour.j) - as.numeric(hour.i)]
 plots <- lapply(subjects, function(subj) {
-  sd <- gordon.div[subj]
+  sd <- gordon.div[.(subj, subj)]
   sd <- sd[delta.t > 0]
   p <- ggplot(sd, aes(x = delta.t, y = jsd)) +
     geom_point(size = 0.1) +
@@ -820,74 +833,105 @@ gordon.div[, state := {
   if (state.i == state.j) state.i
   else "cross"
 }, by = .(state.i, state.j)]  
-p0 <- gordon.div[delta.t > 0] %>% 
-  .[, state := {
-    if (state.i == state.j) state.i
-    else "cross"
-  }, by = .(state.i, state.j)] %>% 
+p0 <- gordon.div[(subject.i == subject.j) & (delta.t > 0)] %>% 
   ggplot(aes(x = distance))
-cdf <- p0 + stat_ecdf(aes(color = state)) + facet_wrap(~ subject, nrow = 1) + 
+cdf <- p0 + stat_ecdf(aes(color = state)) + facet_wrap(~ subject.i, nrow = 1) + 
   labs(y = "ECDF") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-# dens <- p0 + stat_bin(aes(y = ..ncount.., fill = state), position = "dodge",
-#                       bins = 10) 
 dens <- p0 + stat_density(aes(fill = state), alpha = 0.3,
                           position = "identity")
 dens <- dens +
-  facet_wrap(~ subject, nrow = 1) +
+  facet_wrap(~ subject.i, nrow = 1) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 plot_grid(cdf, dens, nrow = 2, align = "v")
 ```
 
-Paths:
-```{r gordon-paths,fig.width=7,fig.height=8}
-setkey(gordon.div, subject)
-setkey(gordon, subject)
-paths <- lapply(subjects, function(subj) {
-  sd <- gordon.div[subj]
-  ts <- as.numeric(unique(sd$ti))
+### Paths
+Running MDS on all subjects tends results in inter-subject variation dominating intra-subject cholera/recovery variation.
+Overall, the similarity between trajectories seen in the tICA analysis is not seen.
+```{r gordon-paths}
+setkey(gordon.div, subject.i, subject.j)
+setkey(gordon.samples, subject)
+edges <- lapply(subjects, function(subj) {
+  sd <- gordon.div[.(subj, subj)]
+  ts <- as.numeric(unique(sd$hour.i))
   ts <- as.character(sort(ts))
-  edges <- cbind(ts[-length(ts)], ts[-1])
-  verts <- gordon[subj, .(id = as.character(hour),
-                          hour = as.numeric(hour), state)] %>% 
-    unique
-  graph <- graph_from_data_frame(edges, directed = TRUE, vertices = verts)
-  dm <- dcast(sd, ti ~ tj, value.var = "distance")
-  rn <- dm[, ti]
-  dm <- as.matrix(dm[, -1])
-  rownames(dm) <- rn
-  # layout <- create_layout_tsne(graph, dm, 1, 5)
-  layout <- create_layout(graph, "mds", dist = dm)
-  p <- ggraph(layout) +
-    geom_edge_link(arrow = arrow(type = "closed", length = unit(5, "points")),
-                   edge_width = 0.2, end_cap = square(length = 5, 
-                                                      unit = "points")) +
-    geom_node_point(aes(color = state)) +
-    theme_graph(base_family = "Helvetica")
-})
-plot_grid(plotlist = paths, ncol = 2, labels = names(paths))
+  ej <- data.table(ti = ts[-length(ts)], tj = ts[-1])
+  samps <- gordon.samples[subj, .(sample, hour)]
+  samps[, hour := as.character(hour)]
+  ej <- merge(ej, samps, by.x = "ti", by.y = "hour")
+  ej <- merge(ej, samps, by.x = "tj", by.y = "hour", suffixes = c(".i", ".j"))
+  ej[, .(sample.i, sample.j)]
+}) %>% rbindlist()
+graf <- graph_from_data_frame(edges,
+                              directed = TRUE, vertices = gordon.samples)
+dm <- dcast(gordon.div, sample.i ~ sample.j, value.var = "distance")
+rn <- dm[, sample.i]
+dm <- as.matrix(dm[, -1])
+rownames(dm) <- rn
+set.seed(1)
+lo <- create_layout(graf, "mds", dist = dm)
+ggraph(lo) +
+  geom_edge_link(arrow = arrow(type = "closed", length = unit(3, "points")),
+                 edge_width = 0.2, end_cap = square(length = 3,
+                                                    unit = "points")) +
+  geom_node_point(aes(color = state, shape = subject)) +
+  scale_shape_manual(values = seq(1, length(subjects))) +
+  # facet_nodes(~ subject) +
+  theme_graph(base_family = "Helvetica")
 ```
 
-Clustering:
+### Tree
+
+All together:
+```{r,fig.width=7,fig.height=7}
+dm <- dcast(gordon.div, sample.i ~ sample.j, value.var = "distance")
+rn <- dm[, sample.i] 
+dm <- as.matrix(dm[, -1])
+rownames(dm) <- rn
+dendro <- as.dendrogram(hclust(dist(dm)))
+# annotate
+setkey(gordon.samples, sample)
+dendro <- dendrapply(dendro, function(d) {
+  if (is.leaf(d)) {
+    samp.id <- attr(d, "label")
+    sample <- gordon.samples[samp.id]
+    subj <- sample$subject
+    state <- sample$state
+    attr(d, "nodePar") <- append(attr(d, "nodePar"), list(subject = subj,
+                                                          state = state))
+  }
+  d
+})
+lo <- create_layout(dendro, "dendrogram", circular = TRUE)
+ggraph(lo) +
+  geom_edge_elbow() +
+  geom_node_point(aes(filter = leaf, shape = subject, color = state)) +
+  scale_shape_manual(values = seq(1, length(subjects))) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+```
+
 ```{r gordon-state-clusters,fig.width=7,fig.height=10}
-setkey(gordon.div, subject)
-setkey(gordon, subject, hour)
+setkey(gordon.div, subject.i, subject.j)
+gordon.samples[, hour := as.character(hour)]
+setkey(gordon.samples, subject, hour)
 trees <- lapply(subjects, function(subj) {
-  sd <- gordon.div[subj]
-  sd <- dcast(sd, ti ~ tj, value.var = "distance")
-  rn <- sd[, ti]
+  sd <- gordon.div[.(subj, subj)]
+  sd <- dcast(sd, hour.i ~ hour.j, value.var = "distance")
+  rn <- sd[, hour.i]
   dm <- as.matrix(sd[, -1])
   rownames(dm) <- rn
   dendro <- as.dendrogram(hclust(dist(dm)))
   # merge time data and state
-  sd[, time.index := frank(as.numeric(ti))]
-  setkey(sd, ti)
+  sd[, time.index := frank(as.numeric(hour.i))]
+  setkey(sd, hour.i)
   dendro <- dendrapply(dendro, function(node) {
     if (is.leaf(node)) {
       labl <- attr(node, "label")
       t <- as.numeric(labl)
       time.index <- as.numeric(sd[labl, time.index])
-      state <- unique(gordon[.(subj, labl), state])
+      state <- gordon.samples[.(subj, labl), state]
       attr(node, "nodePar") <- append(attr(node, "nodePar"), 
                                       list(hour = t, time.index = time.index,
                                            state = state)
