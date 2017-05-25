@@ -1,11 +1,11 @@
 ---
 title: "Decomposition of time scales in microbial time series"
 output:
-  html_notebook: default
   html_document:
     toc: yes
     toc_depth: 2
     toc_float: yes
+  html_notebook: default
   pdf_document: default
 ---
 
@@ -492,71 +492,101 @@ david <- fread(paste0(data.dir, "david/david.otus"),
                col.names = c("sample", "otu", "count")
                )
 # parse subject and timepoints
-david[, c("subject", "day") := tstrsplit(sample, "_")]
+david.samples <- unique(david[, .(sample)])
+david.samples[, c("subject", "day") := tstrsplit(sample, "_")]
 # log transform otu counts
 david[, log.count := log(count + 1)]
 # split by subject
-subjects <- c(A = "A", B = "B")
+david.subjects <- unique(david.samples$subject)
+names(david.subjects) <- david.subjects
 # create tables of day-day divergences
-setkey(david, subject)
-david.div <- lapply(subjects, function(subj) {
-  dt <- david[subj]
-  out <- expand.grid(day.i = unique(dt$day),
-                     day.j = unique(dt$day),
-                     stringsAsFactors = FALSE
-                     )
-  out <- as.data.table(out)
-  # keep only upper triangle
-  out <- out[as.numeric(day.i) >= as.numeric(day.j)]
-  return(out)
-}) %>% rbindlist(idcol = "subject")
-# transiently rename column to avoid name conflict
-setnames(david, "subject", "subj")
-setkey(david, day, subj)
+david.div <- data.table(expand.grid(sample.i = david.samples$sample,
+                                    sample.j = david.samples$sample)
+                        )
+david.samples[, idx := 1:.N]
+david.samples[, subj.idx := frank(as.numeric(day)), by = subject]
+david.div <- merge(david.div, david.samples, by.x = "sample.i", 
+                   by.y = "sample")
+david.div <- merge(david.div, david.samples, by.x = "sample.j", 
+                   by.y = "sample", suffixes = c(".i", ".j"))
+david.div <- david.div[idx.j >= idx.i]
+setkey(david, sample)
 david.div[, jsd := {
-  if (day.i == day.j) {
+  if (sample.i == sample.j) {
     0
   } else {
-    sd <- david[.(c(day.i, day.j), subject)]
-    # m <- dcast(sd, otu ~ day, value.var = "log.count")
-    m <- dcast(sd, otu ~ day, value.var = "count")
+    sd <- david[c(sample.i, sample.j)]
+    m <- dcast(sd, otu ~ sample, value.var = "count")
     m <- as.matrix(m[, 2:3])
     m[is.na(m)] <- 0
     genJSD(m)
   }
-}, by = .(subject, day.i, day.j)]
-setnames(david, "subj", "subject") #sigh
+}, by = .(sample.i, sample.j)]
 # reciprocal distances
-david.div <- rbind(david.div, david.div[day.i != day.j, .(day.j = day.i, 
-                                                    day.i = day.j,
-                                                    subject, jsd 
-                                                    )]
-)
+david.div <- david.div[sample.i != sample.j] %>% 
+  setnames(names(david.div), sapply(names(david.div), function(x) {
+    if (grepl("idx\\.i", x)) {
+      gsub("idx\\.i", "idx\\.j", x)
+    } else if (grepl("idx\\.j", x)) {
+      gsub("idx\\.j", "idx\\.i", x)
+    } else if (grepl("\\.i", x)) {
+      gsub("\\.i", "\\.j", x)
+    } else if (grepl("\\.j", x)) {
+      gsub("\\.j", "\\.i", x)
+    } else x
+  })
+  ) %>%  
+  rbind(david.div)
 david.div[, distance := sqrt(jsd)]
-david.div[, day.delta := as.numeric(day.i) - as.numeric(day.j)]
+david.div[, day.delta := as.numeric(day.j) - as.numeric(day.i)]
+david.div[subject.i == subject.j, increment := subj.idx.j - subj.idx.i]
+```
+
+Merge event metadata:
+```{r}
+# metadata
+setkey(david.samples, subject)
+events <- mapply(function(start, end, subject, event) {
+  x <- data.table(day = seq(start, end, by = 1), subject = subject, 
+                  event = event)
+  x
+}, start = c(0, 71, 80, 104, 123, 
+             0, 151, 160 ),
+end =   c(70, 122, 85, 113, david.samples["A", max(as.numeric(day))], 
+          150, 159, david.samples["B", max(as.numeric(day))]),
+subject = c("A", "A", "A", "A", "A", 
+            "B", "B", "B"),
+event = c("US (pre)", "travel", "diarrhea 1", "diarrhea 2", "US (post)", 
+          "pre-Salmonella", "Salmonella", "post-Salmonella"),
+SIMPLIFY = FALSE) %>% rbindlist(use.names = TRUE) 
+# collapse event labels per day
+unique.day.events <- events[, .(event = paste(event, collapse = " + ")), 
+                           by = .(subject, day)]
+unique.day.events[, day := as.character(day)]
+david.div <- merge(david.div, unique.day.events, by.x = c("subject.i", "day.i"),
+                   by.y = c("subject", "day"))
+david.div <- merge(david.div, unique.day.events, by.x = c("subject.j", "day.j"),
+                   by.y = c("subject", "day"), suffixes = c(".i", ".j"))
 ```
 ```{r david-stepsizes-day}
-# metadata
-
-events <- data.table(start = c(0, 71, 80, 104, 123, 0, 151, 160 ), 
-                     end =   c(70, 122, 85, 113, Inf, 150, 159, Inf),
-                     subject = c("A", "A", "A", "A", "A", "B", "B", "B"),
-                     event = c("US (pre)", "travel", "diarrhea 1", 
-                               "diarrhea 2", "US (post)", "pre-Salmonella", 
-                               "Salmonella", "post-Salmonella"))
-david.div[day.delta == 1] %>% 
+setkey(david.div, subject.i, subject.j)
+david.div[subject.i == subject.j & day.delta == 1] %>% 
   ggplot(aes(x = distance)) +
   geom_histogram(binwidth = 0.01) +
-  facet_wrap(~ subject, nrow = 2)
-setkey(events, event)
-david.div[day.delta == 1] %>% 
+  facet_wrap(~ subject.i, nrow = 2)
+event.lims <- events[, .(start = min(day), end = max(day)), 
+                     by = .(event, subject)]
+event.lims <- event.lims[!grepl("pre", event) & !grepl("post", event)]
+event.lims[, event := factor(levels = c("travel", "diarrhea 1", "diarrhea 2",
+                                        "Salmonella"), event)]
+david.div[subject.i == subject.j & day.delta == 1] %>% 
   mutate(day.i = as.numeric(day.i)) %>% 
+  setnames("subject.i", "subject") %>% 
   ggplot(aes(x = day.i, y = distance)) +
-  geom_rect(data = events[c("travel", "diarrhea 1", "diarrhea 2", "Salmonella")], 
-            mapping = aes(xmin = start, xmax = end, fill = event, ymin = 0.1, 
-                          ymax = 1.05), 
-            alpha = 0.5,
-            inherit.aes = FALSE) +
+  geom_rect(data = event.lims, 
+    mapping = aes(fill = event, xmin = start, xmax = end, 
+                  ymin = 0.1, ymax = 1.05
+                  ), inherit.aes = FALSE, alpha = 0.5) +
   geom_point() +
   facet_wrap(~ subject, nrow = 2)
 ```
@@ -565,112 +595,130 @@ Distributions of all distances for all time scales.
 We see that both length distributions are multimodal, indicating at least 2 compositional "length scales."
 We also see that the vast majority of A distances belong to the lowest mode, while the second lowest mode of B is as high as the lowest, indicating that subject B spends a significant amount of time (relative to the length of the entire measurement).
 ```{r david-all-dist-distrib,fig.width=5,fig.height=5}
-p0 <- ggplot(david.div, aes(x = distance)) 
+p0 <- ggplot(david.div[subject.i == subject.j], aes(x = distance)) 
 ar <- 3 / 5
-cdf <- p0 + stat_ecdf(aes(color = subject)) + labs(y = "ECDF") +
+cdf <- p0 + stat_ecdf(aes(color = subject.i)) + labs(y = "ECDF") +
   theme(aspect.ratio = ar)
-dens <- p0 + stat_density(aes(fill = subject), alpha = 0.5, 
+dens <- p0 + stat_density(aes(fill = subject.i), alpha = 0.5, 
                           position = "identity") +
   theme(aspect.ratio = ar)
 plot_grid(cdf, dens, nrow = 2, align = "v")
 ```
 ```{r, david-time-vs-distance,fig.width=6,fig.height=5}
-ggplot(david.div[day.delta > 0], aes(x = distance, y = day.delta)) +
-  # geom_point(data = unique(david.div[day.delta > 0], by = c("distance", "day.delta")), 
-  #            size = 0.1) +
-  # stat_density_2d(aes(fill = ..level..), geom = "polygon") +
+ggplot(david.div[subject.i == subject.j & day.delta > 0], 
+       aes(x = distance, y = day.delta)) +
   stat_bin_2d() +
   labs(y = "interval") +
-  facet_wrap(~ subject, nrow = 2)
+  facet_wrap(~ subject.i, nrow = 2)
 ```
 
-
-```{r david-path-plots,fig.width=7,fig.height=8}
-setkey(david.div, subject)
-setkey(events, "subject")
+### Paths
+```{r david-path-plots}
 david.subjects <- c("A", "B")
 names(david.subjects) <- david.subjects
-david.graphs <- lapply(david.subjects, function(subj) {
-  dt <- david.div[subj]
-  metadata <- events[subj]
-  # get rid of any NA distances (missing days)
-  dt <- dt[!is.na(distance)]
-  # the days for which we actually have data
-  days <- unique(c(dt$day.i, dt$day.j))
-  days <- days[order(as.numeric(days))]
-  # edges between consecutive days
-  edges <- cbind(days[-length(days)], days[-1])
-  # graph structure
-  vertices <- data.table(id = days, day = as.numeric(days))
-  vertices[, event := sapply(day, function(d, md = metadata) {
-    events <- md[day >= start & day <= end, event]
-    if (length(events) > 0) {
-      events <- unique(events)
-      if (length(events) > 1) {
-        events <- paste(events, collapse = " + ")
-      }
-    } else {
-      # browser()
-      events <- as.character(NA)
-    }
-    events
-  }), by = day]
-  graph <- graph_from_data_frame(edges, directed = TRUE, vertices = vertices)
-  # distance matrix
-  dm <- dcast(dt, day.i ~ day.j, value.var = "distance")
-  rn <- dm[, day.i]
-  dm <- as.matrix(dm[, -1])
-  rownames(dm) <- rn
-  return(list(graph = graph, dm = dm))
-  }
+setkey(david.div, subject.i, subject.j)
+dm <- dcast(david.div, sample.i ~ sample.j, value.var = "distance")
+rn <- dm$sample.i
+dm <- as.matrix(dm[, -1])
+rownames(dm) <- rn
+xform <- cmdscale(dist(dm))
+colnames(xform) <- c("x", "y")
+rn <- rownames(xform)
+xform <- as.data.table(xform)
+xform[, sample := rn]
+setcolorder(xform, c("sample", "x", "y"))
+setkey(xform, sample)
+# put sample labels at first 2 columns
+setcolorder(david.div, c("sample.i", "sample.j",
+                         names(david.div)[!(names(david.div) %in%
+                                              c("sample.i", "sample.j"))])
+            )
+david.samples[, day := as.numeric(day)]
+graf <- graph_from_data_frame(
+  david.div[subject.i == subject.j & increment == 1],
+  directed = TRUE,
+  vertices = david.samples
   )
-layouts <- lapply(david.graphs, function(x) {create_layout(x$graph, "mds", dist = x$dm)})
-path.plots <- lapply(layouts, function(lo) {
-  ggraph(lo) + 
-    geom_edge_link(arrow = arrow(type = "closed", 
-                                 length = unit(5, "points")),
-      edge_width = 0.2,
-      end_cap = square(length = 5, unit = "points")) +
-    geom_node_point(aes(color = day, shape = event)) +
-    scale_color_distiller(palette = "Spectral") +
-    theme_graph(base_family = "Helvetica")
-})
-plot_grid(plotlist = path.plots, nrow = 2, labels = "AUTO")
+setkey(xform, sample)
+xform <- xform[V(graf)$name]
+lo <- create_layout(graf, "manual", node.positions = xform)
+ggraph(lo) +
+  geom_edge_link(arrow = arrow(length = unit(3, "points"), type = "closed"),
+                 end_cap = square(length = 3, unit = "points"),
+                 edge_width = 0.2) +
+  geom_node_point(aes(color = day, shape = subject)) +
+  scale_color_distiller(palette = "Blues") +
+  facet_nodes(~ subject) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
 ```
 
-Tree representation.
-Color graphs by events:
+
+### Trees
+
+#### Together
+```{r david-merged-tree,fig.width=7,fig.height=20}
+dm <- dcast(david.div, sample.i ~ sample.j, value.var = "distance")
+rn <- dm$sample.i
+dm <- dm[, -1]
+dm <- as.matrix(dm)
+rownames(dm) <- rn
+dendro <- as.dendrogram(hclust(dist(dm)))
+unique.day.events[, day := as.character(day)]
+setkey(unique.day.events, subject, day)
+david.samples[, day := as.character(day)]
+david.samples[, state := {
+  subj <- subject
+  dd <- day
+  unique.day.events[.(subj, dd), event]
+}, by = .(subject, day)]
+setkey(david.samples, sample)
+dendro <- dendrapply(dendro, function(d) {
+  if (is.leaf(d)) {
+    samp <- attr(d, "label")
+    subj <- david.samples[samp, subject]
+    state <- david.samples[samp, state]
+    attr(d, "nodePar") <- append(attr(d, "nodePar"), list(subject = subj, 
+                                                          state = state))
+  }
+  d
+})
+ggraph(dendro, "dendrogram") +
+  geom_edge_elbow() +
+  geom_node_point(aes(filter = leaf, shape = subject, color = state), size = 1) +
+  theme_graph(base_family = "Helvetica") +
+  # theme(aspect.ratio = 1) + 
+  coord_flip()
+```
+
+#### Separate
 ```{r david-event-trees,fig.height=9,fig.width=7}
-dendros <- lapply(david.graphs, function(x) {
-  dm <- x$dm
+setkey(david.div, subject.i, subject.j)
+dendros <- lapply(david.subjects, function(subj) {
+  sd <- david.div[.(subj, subj)]
+  dm <- dcast(sd, sample.i ~ sample.j, value.var = "distance")
+  rn <- dm$sample.i
+  dm <- dm[, -1]
+  dm <- as.matrix(dm)
+  rownames(dm) <- rn
   hc <- hclust(dist(dm))
   dendro <- as.dendrogram(hc)
-  dendro <- dendrapply(dendro, function(d) {
-    if (is.leaf(d)) {
-      attr(d, "nodePar") <- list(day = as.numeric(attr(d, "label")))
-    }
-    d
-  })
-  # would be nice to manipulate this as a data.frame but I can't figure it out
   return(dendro)
 }
 )
-setkey(events, subject)
+unique.day.events[, day := as.character(day)]
+# setkey(events, subject)
+setkey(unique.day.events, subject, day)
+setkey(david.samples, sample)
 dendros <- lapply(david.subjects, function(subj) {
   dendro <- dendros[[subj]]
-  metadata <- events[subj]
   dendro <- dendrapply(dendro, function(d) {
     if (is.leaf(d)) {
-      day <- attr(d, "nodePar")$day
-      ev <- unique(metadata[day >= start & day <= end, event])
-      if (length(ev) > 0) {
-        if (length(ev) > 1) {
-          ev <- paste(ev, collapse = " + ")
-        }
-      } else {
-        ev <- NA
-      }
-      attr(d, "nodePar") <- append(attr(d, "nodePar"), list(event = ev))
+      dday <- david.samples[attr(d, "label"), as.character(day)]
+      ev <- unique.day.events[.(subj, dday), event]
+      attr(d, "nodePar") <- append(attr(d, "nodePar"), list(
+        day = as.numeric(dday),
+        event = ev))
     }
     d
   })
@@ -869,16 +917,25 @@ dm <- dcast(gordon.div, sample.i ~ sample.j, value.var = "distance")
 rn <- dm[, sample.i]
 dm <- as.matrix(dm[, -1])
 rownames(dm) <- rn
-set.seed(1)
-lo <- create_layout(graf, "mds", dist = dm)
+# manual MDS
+xform <- cmdscale(dist(dm))
+colnames(xform) <- c("x", "y")
+rn <- rownames(xform)
+xform <- as.data.table(xform)
+xform[, sample := rn]
+# order
+setkey(xform, sample)
+xform <- xform[V(graf)$name]
+lo <- create_layout(graf, "manual", node.positions = xform)
 ggraph(lo) +
   geom_edge_link(arrow = arrow(type = "closed", length = unit(3, "points")),
                  edge_width = 0.2, end_cap = square(length = 3,
                                                     unit = "points")) +
-  geom_node_point(aes(color = state, shape = subject)) +
-  scale_shape_manual(values = seq(1, length(subjects))) +
-  # facet_nodes(~ subject) +
-  theme_graph(base_family = "Helvetica")
+  geom_node_point(aes(color = state)) +
+  # scale_shape_manual(values = seq(1, length(subjects))) +
+  facet_nodes(~ subject, nrow = 2) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
 ```
 
 ### Tree
