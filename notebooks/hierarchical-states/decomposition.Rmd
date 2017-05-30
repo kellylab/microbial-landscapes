@@ -1,11 +1,11 @@
 ---
 title: "Decomposition of time scales in microbial time series"
 output:
+  html_notebook: default
   html_document:
     toc: yes
     toc_depth: 2
     toc_float: yes
-  html_notebook: default
   pdf_document: default
 ---
 
@@ -918,7 +918,9 @@ rn <- dm[, sample.i]
 dm <- as.matrix(dm[, -1])
 rownames(dm) <- rn
 # manual MDS
-xform <- cmdscale(dist(dm))
+fit <- cmdscale(dist(dm), eig = TRUE)
+eigrank <- data.table(rank = seq(length(fit$eig)), value = fit$eig)
+xform <- fit$points
 colnames(xform) <- c("x", "y")
 rn <- rownames(xform)
 xform <- as.data.table(xform)
@@ -936,6 +938,8 @@ ggraph(lo) +
   facet_nodes(~ subject, nrow = 2) +
   theme_graph(base_family = "Helvetica") +
   theme(aspect.ratio = 1)
+ggplot(eigrank, aes(x = rank, y = value)) +
+  geom_point() 
 ```
 
 ### Tree
