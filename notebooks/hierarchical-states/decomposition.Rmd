@@ -134,7 +134,7 @@ rn <- dm[, month.i]
 dm <- as.matrix(dm[, -1])
 rownames(dm) <- rn
 # layout <- create_layout_tsne(graph, dm, 1)
-layout <- create_layout_nmds(graph, dm, trace = 0)
+# layout <- create_layout_nmds(graph, dm, trace = 0)
 mbreaks <- c(1, 3, 6, 9, 12) # Jan, plus months of solstices + equinoxes
 p1 <- ggraph(layout) +
   geom_edge_link(arrow = arrow(type = "closed", 
@@ -213,17 +213,6 @@ sub-branches within them.
 ## Coarse-graining states
 Let the depth = 1 node ID be the state label of each time point
 ```{r bats-states-coarsegrain}
-# graf <- tree_apply(graf, function(node, parent, depth, tree, th = 2) {
-#   if (depth < th) {
-#     state <- NA
-#   } else if (depth == th) {
-#     state <- V(tree)$name[node]
-#   } else if (depth >th) {
-#     state <- V(tree)$state[parent]
-#   }
-#   tree <- set_vertex_attr(tree, "state", node, state)
-#   tree
-# })
 # create a unique ID for each state at depth = 2 and propagate down 
 states <- tree_apply(den_to_igraph(dendro), 
                      function(node, parent, depth, tree, th = 2) {
@@ -392,13 +381,13 @@ edges <- cbind(days[-length(days)], days[-1])
 graph <- graph_from_data_frame(edges, directed = FALSE,
                                vertices = data.table(id = days,
                                                      day = as.numeric(days)))
-dm <- dcast(day.div, day.i ~ day.j, value.var = "distance")
-rn <- dm[, day.i]
-dm <- as.matrix(dm[, -1])
-rownames(dm) <- rn
-layout <- create_layout(graph, "mds", dist = dm)
-# layout <- create_layout_tsne(graph, dm, 1)
-# layout <- create_layout_nmds(graph, dm, trace = 0)
+dm <- MakeDistMatrix(day.div, "day.i", "day.j")
+fit <- CoordCMDS(dm)
+xform <- fit$points
+# order
+setkey(xform, sample)
+xform <- xform[V(graph)$name]
+layout <- create_layout(graph, "manual", node.positions = xform)
 p1 <- ggraph(layout) +
   geom_edge_link(arrow = arrow(type = "closed", 
                                length = unit(5, "points")),
@@ -426,6 +415,13 @@ p2 <- ggraph(dendro, "dendrogram") +
   # theme(aspect.ratio = 1)
 plot_grid(p1, p2, nrow = 2, align = "hv", labels = c("A", "B"))
 ```
+
+The eigenvalues of the MDS transform:
+```{r bats-mds-eigen}
+ggplot(fit$eigrank, aes(x = rank, y = value)) +
+  geom_point()
+```
+
 
 ## Statistics of dynamics 
 
@@ -613,19 +609,13 @@ ggplot(david.div[subject.i == subject.j & day.delta > 0],
 ```
 
 ### Paths
-```{r david-path-plots}
+```{r david-path-plots,fig.width=7,fig.height=7}
 david.subjects <- c("A", "B")
 names(david.subjects) <- david.subjects
 setkey(david.div, subject.i, subject.j)
-dm <- dcast(david.div, sample.i ~ sample.j, value.var = "distance")
-rn <- dm$sample.i
-dm <- as.matrix(dm[, -1])
-rownames(dm) <- rn
-xform <- cmdscale(dist(dm))
-colnames(xform) <- c("x", "y")
-rn <- rownames(xform)
-xform <- as.data.table(xform)
-xform[, sample := rn]
+dm <- MakeDistMatrix(david.div, "sample.i", "sample.j")
+fit <- CoordCMDS(dm)
+xform <- fit$points
 setcolorder(xform, c("sample", "x", "y"))
 setkey(xform, sample)
 # put sample labels at first 2 columns
@@ -642,16 +632,33 @@ graf <- graph_from_data_frame(
 setkey(xform, sample)
 xform <- xform[V(graf)$name]
 lo <- create_layout(graf, "manual", node.positions = xform)
-ggraph(lo) +
+nsize <- 1
+p1 <- ggraph(lo) +
   geom_edge_link(arrow = arrow(length = unit(3, "points"), type = "closed"),
                  end_cap = square(length = 3, unit = "points"),
                  edge_width = 0.2) +
-  geom_node_point(aes(color = day, shape = subject)) +
+  geom_node_point(aes(color = day), size = nsize) +
   scale_color_distiller(palette = "Blues") +
   facet_nodes(~ subject) +
   theme_graph(base_family = "Helvetica") +
   theme(aspect.ratio = 1)
+p2 <- ggraph(lo) +
+  geom_edge_link(arrow = arrow(length = unit(3, "points"), type = "closed"),
+                 end_cap = square(length = 3, unit = "points"),
+                 edge_width = 0.2) +
+  geom_node_point(aes(color = state), size = nsize) +
+  facet_nodes(~ subject) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+plot_grid(p1, p2, nrow = 2, align = "v")
 ```
+
+Eigenvalues by rank:
+```{r david-eigen-rank}
+ggplot(fit$eigrank, aes(x = rank, y = value)) +
+  geom_point()
+```
+
 
 
 ### Trees
@@ -913,18 +920,9 @@ edges <- lapply(subjects, function(subj) {
 }) %>% rbindlist()
 graf <- graph_from_data_frame(edges,
                               directed = TRUE, vertices = gordon.samples)
-dm <- dcast(gordon.div, sample.i ~ sample.j, value.var = "distance")
-rn <- dm[, sample.i]
-dm <- as.matrix(dm[, -1])
-rownames(dm) <- rn
-# manual MDS
-fit <- cmdscale(dist(dm), eig = TRUE)
-eigrank <- data.table(rank = seq(length(fit$eig)), value = fit$eig)
+dm <- MakeDistMatrix(gordon.div, "sample.i", "sample.j")
+fit <- CoordCMDS(dm)
 xform <- fit$points
-colnames(xform) <- c("x", "y")
-rn <- rownames(xform)
-xform <- as.data.table(xform)
-xform[, sample := rn]
 # order
 setkey(xform, sample)
 xform <- xform[V(graf)$name]
@@ -938,8 +936,17 @@ ggraph(lo) +
   facet_nodes(~ subject, nrow = 2) +
   theme_graph(base_family = "Helvetica") +
   theme(aspect.ratio = 1)
-ggplot(eigrank, aes(x = rank, y = value)) +
+ggplot(fit$eigrank, aes(x = rank, y = value)) +
   geom_point() 
+```
+
+All points plot show recovery and diarrhea cluster separately for all patients, with diarrhea having greater spread:
+```{r}
+ggraph(lo) +
+  geom_node_point(aes(color = state, shape = subject)) +
+  scale_shape_manual(values = seq(uniqueN(gordon.samples$subject))) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
 ```
 
 ### Tree

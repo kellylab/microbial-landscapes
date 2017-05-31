@@ -209,3 +209,58 @@ create_layout_nmds <- function(graph, dm, ...) {
   layout <- create_layout(graph, "manual", node.positions = nmds)
   return(layout)
 }
+
+#' Converts distance matrix to x, y coordinates using classical MDS.
+#' Returns coordinates in a data.table and optionally eigenvalues.
+#'
+#' @param dm Distance matrix, must have row and column names.
+#' @param eig Return eigenvalues?
+#' @param ... Passed to `cmdscale`
+#'
+#' @return
+#' If `eig`, list with point coordinates (`points`) and ranked eigenvalues (`eigrank`).
+#' Otherwise just the coordinates. All as data.tables.
+#'
+#' @export
+#'
+#' @examples
+CoordCMDS <- function(dm, eig = TRUE, ...) {
+  fit <- cmdscale(dist(dm), eig = eig, ...)
+  if (eig) {
+    xform <- fit$points
+    eigrank <- data.table(rank = seq(length(fit$eig)), value = fit$eig)
+  } else {
+    xform <- fit
+  }
+  colnames(xform) <- c("x", "y")
+  rn <- rownames(xform)
+  xform <- as.data.table(xform)
+  xform[, sample := rn]
+  if (eig) {
+    list(points = xform, eigrank = eigrank)
+  } else {
+    xform
+  }
+}
+
+#' Makes a named distance matrix from a data.table of (x, y, distance(x, y)).
+#'
+#' @param dt
+#' @param id.x String, name of identifier column x
+#' @param id.y String, name of identifier column y
+#' @param value.cn name of column with distances
+#'
+#' @return
+#' `dm`  Named distance `matrix`.
+#'
+#' @export
+#'
+#' @examples
+MakeDistMatrix <- function(dt, id.x, id.y, value.cn = "distance") {
+  formula <- paste(id.x, "~", id.y)
+  dm <- dcast(dt, formula, value.var = value.cn)
+  rn <- dm[, get(id.x)]
+  dm <- as.matrix(dm[, -1])
+  rownames(dm) <- rn
+  dm
+}
