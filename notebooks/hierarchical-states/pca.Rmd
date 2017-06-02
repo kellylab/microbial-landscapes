@@ -1,0 +1,116 @@
+---
+title: "PCA"
+output: html_notebook
+---
+
+```{r setup}
+library(dplyr)
+library(data.table)
+library(cowplot)
+library(igraph)
+library(ggraph)
+
+source("load_data.R")
+```
+
+# BATS
+
+Bats data show clear seasonal cycling.
+Can we see this in PCA?
+First let's look at the variance in relative abundance of each ecotype at each depth to see if we need to log transform.
+```{r}
+bats[, rel.abund := abundance / sum(abundance), by = depth]
+bats[, .(variance = var(rel.abund)), by = .(depth, ecotype)] %>% 
+  ggplot(aes(x = ecotype, y = variance)) +
+  geom_point() +
+  scale_y_log10() +
+  facet_wrap(~ depth) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust = 0.5))
+```
+So yes, probably, especially in the shallower depths.
+```{r}
+bats[, log.rel.abund := log10(rel.abund)]
+bats.depthmonth <- dcast(bats, yrday_gmt + year + month + depth ~ ecotype, 
+                         value.var = "log.rel.abund", fun.aggregate = mean)
+```
+PCA each depth separately:
+```{r}
+bats.ecotypes <- unique(bats$ecotype)
+bats.depths <- unique(bats$dep)
+names(bats.depths) <- bats.depths
+bats.depths <- bats.depths[order(as.numeric(bats.depths))]
+bats.pcas <- lapply(bats.depths, function(de) {
+  sd <- bats.depthmonth[depth == de]
+  p <- prcomp(as.formula(paste("~ ", paste(bats.ecotypes, collapse = " + "))),
+              sd, retx = TRUE)
+  p <- append(p, list(yrday_gmt = sd$yrday_gmt))
+})
+```
+Loading of each ecotype in the first two PCs at each depth:
+```{r}
+bats.loading <- lapply(names(bats.pcas), function(de) {
+  data <- bats.pcas[[de]]
+  rot <- data$rotation
+  data.table(depth = de, ecotype = rownames(rot), PC1 = rot[, 1], 
+             PC2 = rot[, 2])}) %>% rbindlist(use.names = TRUE)
+bats.loading <- melt(bats.loading, id.vars = c("depth", "ecotype"),
+                     variable.name = "pc", value.name = "loading")
+bats.loading[, depth := factor(depth, levels = bats.depths)]
+ggplot(bats.loading, aes(x = pc, y = ecotype)) +
+  geom_tile(aes(fill = loading)) +
+  facet_wrap(~ depth, nrow = 1) +
+  scale_fill_distiller(palette = "RdBu") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```   
+
+Transformed data points, cyclic trajectories not obvious:
+```{r}
+bats.xform <- lapply(names(bats.pcas), function(de) {
+  data <- bats.pcas[[de]]
+  x <- data$x
+  out <- data.table(yrday_gmt = data$yrday_gmt, depth = de, PC1 = x[, 1], 
+                    PC2 = x[, 2])
+  out
+}) %>% rbindlist(use.names = TRUE)
+# merge sample info
+bats.xform <- merge(bats.xform, bats.info, by = "yrday_gmt")
+bats.xform[, depth := factor(depth, levels = bats.depths)]
+# each date-depth is a node
+bats.xform[, id := paste0(yrday_gmt, ".", depth)]
+setkey(bats.xform, depth)
+bats.edges <- lapply(bats.depths, function(de) {
+  de <- as.character(de)
+  sd <- bats.xform[de]
+  setorder(sd, yrday_gmt)
+  ids <- sd$id
+  out <- data.table(from = ids[-length(ids)], to = ids[-1], depth = de)
+  out
+})
+bats.edges <- rbindlist(bats.edges, use.names = TRUE)
+bats.graf <- graph_from_data_frame(bats.edges,
+                                   vertices = unique(bats.xform[, .(id, 
+                                                                    yrday_gmt, 
+                                                                    cal.month,
+                                                                    depth)])
+                                   )
+setkey(bats.xform, id)
+```
+```{r bats-path,fig.width=7,fig.height=14}
+ggraph(bats.graf, "manual", 
+       node.positions = bats.xform[V(bats.graf)$name, .(x = PC1, y = PC2)]) +
+  geom_edge_link(arrow = arrow(type = "closed", length = unit(3, "points")),
+                 end_cap = square(length = 3, unit = "points"),
+                 edge_width = 0.2) +
+  geom_node_point(aes(color = cal.month)) +
+  # scale_color_gradient2(low = "blue", mid = "red", high = "blue", 
+  #                       midpoint = 6) +
+  scale_color_gradientn(values = scales::rescale(c(1, 3, 6, 9, 12)), 
+                        colors = c("blue", "green4", "yellow", "orange", 
+                                   "blue")
+                        ) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1) +
+  facet_wrap(~ depth, ncol = 2)
+```
+
+
