@@ -25,93 +25,81 @@ knitr::opts_chunk$set(
   dev = c("pdf", "png")
 )
 data.dir <- "../../data/"
+source("load_data.R")
 ```
 
 # Prochloroccocus
 
 ## BATS
 
-```{r bats}
-proc.bats <- fread(paste0(data.dir, "bats_orig.txt"))
-proc.bats[, cal.month := month]
-proc.bats[, month := month + 12 * (year - min(year))]
-proc.bats <- proc.bats %>% 
-  melt(id.vars = c("year", "month", "depth", "cal.month", "day"), 
-       measure.vars = patterns("Abundance"),
-       value.name = "abundance")
-proc.bats[, abundance := as.numeric(abundance)] 
-setnames(proc.bats, "variable", "ecotype")
-proc.bats[, ecotype := gsub("Abundance", "", ecotype)]
-proc.bats[, ecotype := gsub("_", "", ecotype)]
-bats.alldepths <- proc.bats[, .(mn = mean(abundance, na.rm = TRUE)), 
-                          by = .(month, ecotype)] 
-ecotypes <- unique(bats.alldepths$ecotype)
-# #normalize mean abundances per ecotype
-p1 <- ggplot(bats.alldepths, aes(x = month, y = mn)) +
-  geom_line(aes(group = ecotype, color = ecotype), size = 0.5) +
-  scale_y_log10() +
-  scale_color_discrete(limits = ecotypes) +
-  labs(x = "month", y = "mean\nabundance", color = "ecotype") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) 
-setkey(bats.alldepths, ecotype)
-# spectral analysis per ecotype
-spec <- bats.alldepths %>% 
-  dcast(month ~ ecotype, value.var = "mn") %>% 
-  select(-1) %>% 
-  stats::spectrum(plot = FALSE)
-p2 <- data.table(cbind(spec$freq, spec$spec)) %>% 
-  setnames(c("freq", spec$snames)) %>% 
-  melt(id.vars = "freq", variable.name = "ecotype") %>% 
-  ggplot(aes(x = freq, y = value)) +
-  geom_line(aes(group = ecotype, color = ecotype)) +
-  scale_color_discrete(limits = ecotypes) +
-  labs(x = "frequency (1/cycles per month)",
-       y = "density",
-       color = "ecotype") +
-  scale_y_log10()
-plot_grid(p1, p2, nrow = 2, labels = c("A", "B"), align = "v")
+```{r bats-spectral,fig.width=7,fig.height=7}
+bats[, rel.abund := abundance / sum(abundance), by = depth]
+bats[, log.rel.abund := log10(rel.abund)]
+ggplot(bats, aes(x = month, y = log.rel.abund)) +
+  geom_path(aes(group = ecotype)) +
+  facet_grid(depth ~ ecotype) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+# spectral analysis per ecotype per depth
+# mean per month if more than one sample
+bats.depthlra <- bats[, .(mn = mean(log.rel.abund)), 
+                      by = .(month, depth, ecotype)]
+bats.spec <- bats.depthlra[, {
+  s <- stats::spectrum(mn, plot = FALSE)
+  data.table(freq = s$freq, spec = s$spec)
+  }, by = .(ecotype, depth)]
+# normalize so peak is 1
+bats.spec[, spec := spec / max(spec), by = .(depth, ecotype)]
+bats.spec[, timescale.months := 1 / freq]
+ggplot(bats.spec, aes(x = timescale.months, y = spec)) +
+  geom_point(size = 0.5) +
+  geom_path(aes(group = ecotype)) +
+  facet_grid(depth ~ ecotype) +
+  geom_vline(aes(linetype = "12"), xintercept = 12, color = "blue") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 ```
 
-## State clustering
+## State clustering with JSD
 ```{r bats-states}
-months <- unique(proc.bats[, .(month, cal.month, year)])
-months[, year := as.character(year)]
-month.div <- expand.grid(month.i = months$month, month.j = months$month,
-                         stringsAsFactors = FALSE) %>% 
-  as.data.table()
-month.div <- month.div[month.j <= month.i]
-month.div[, ":=" (month.j = as.character(month.j),
-                  month.i = as.character(month.i))]
-# SOME ABUNDANCES ARE < 1 WHICH PRODUCES NEGATIVE LOGS. THAT IS A PROBLEM
-# WHAT DO ABUNDANCES < 1 MEAN? FIND OUT
-# proc.bats[abundance < 1, log.abundance := 0]
-# proc.bats[abundance >= 1, log.abundance := log(abundance)]
-proc.bats <- proc.bats[abundance >= 1]
-proc.bats[, log.abundance := log(abundance + 1)]
-proc.bats[, month := as.character(month)]
-setkey(proc.bats, month)
-month.div[, jsd := {
-  if (month.j == month.i) {
+setkey(bats, month)
+# all pairs
+bats[, id := paste(month, depth, sep = "_")]
+bats.ids <- unique(bats$id)
+bats.div <- MakeNonRedundantPairs(bats.ids, prefix = "id")
+bats.div[, c("month.i", "depth.i") := tstrsplit(id.i, "_")]
+bats.div[, c("month.j", "depth.j") := tstrsplit(id.j, "_")]
+# it would be nice to get distances between depths but we'll do same depth rn
+# down by order of magnitude
+bats.div <- bats.div[depth.i == depth.j & month.j >= month.i]
+bats.div[, depth.j := NULL]
+setnames(bats.div, "depth.i", "depth")
+setkey(bats, id)
+bats.div[, jsd := {
+  if (id.i == id.j) {
     0
   } else {
-    sd <- proc.bats[c(month.i, month.j)]
-    # m <- dcast(sd, depth + ecotype ~ month, value.var = "log.abundance", 
-    m <- dcast(sd, depth + ecotype ~ month, value.var = "abundance", 
-               fun.aggregate = mean)
-    m <- select(m, -depth, -ecotype)
-    m <- as.matrix(m)
-    m[is.na(m)] <- 0
-    genJSD(m)
+    # browser()
+    sd <- bats[c(id.i, id.j)]
+    sd <- dcast(sd, ecotype ~ id, value.var = "rel.abund", 
+                fun.aggregate = mean)
+    sd <- as.matrix(sd[, -1])
+    genJSD(sd)
   }
-}, by = .(month.i, month.j)]
-month.div <- rbind(month.div, month.div[month.i != month.j, .(
-  month.j = month.i, month.i = month.j, jsd
-)])
-month.div[, distance := sqrt(jsd)]
+  }, by = .(id.i, id.j)]
+rec <- bats.div[id.i != id.j]
+setnames(rec, names(rec), sapply(names(rec), function(str) {
+  if (grepl("\\.i", str)) sub("\\.i", "\\.j", str)
+  else if (grepl("\\.j", str)) sub("\\.j", "\\.i", str)
+  else str
+}))
+bats.div <- rbind(bats.div, rec)
+bats.div[, distance := sqrt(jsd)]
+bats.div[, ":=" (month.i = as.numeric(month.i), 
+                 month.j = as.numeric(month.j))]
+bats.div[, delta := month.j - month.i]
 ```
 Number of months representing each calendar month:
 ```{r bats-cal-month-samples}
-proc.bats[, .(month = as.numeric(month), 
+bats[, .(month = as.numeric(month), 
               cal.month = as.character(cal.month),
               day)] %>% 
   unique() %>% 
@@ -121,80 +109,105 @@ proc.bats[, .(month = as.numeric(month),
   scale_x_discrete(limits = as.character(1:12))
 ```
 
-```{r bats-states-plots,fig.height=6,fig.width=7}
-edges <- cbind(months$month[-length(months$month)], 
-               months$month[-1])
-months[, month := as.character(month)]
-graph <- graph_from_data_frame(edges, directed = FALSE,
-                               vertices = months[, .(id = month, month,
-                                                     cal.month, year)]
-)
-dm <- dcast(month.div, month.i ~ month.j, value.var = "distance")
-rn <- dm[, month.i]
-dm <- as.matrix(dm[, -1])
-rownames(dm) <- rn
-# layout <- create_layout_tsne(graph, dm, 1)
-# layout <- create_layout_nmds(graph, dm, trace = 0)
-mbreaks <- c(1, 3, 6, 9, 12) # Jan, plus months of solstices + equinoxes
-p1 <- ggraph(layout) +
-  geom_edge_link(arrow = arrow(type = "closed", 
-                               length = unit(5, "points")),
-                 edge_width = 0.2,
-                 end_cap = square(length = 5, unit = "points")
-                 ) +
-  geom_node_point(aes(color = cal.month, shape = year)) +
-  theme_graph(base_family = "Helvetica") +
-  guides(shape = guide_legend(ncol = 2)) +
-  scale_color_gradientn(values = scales::rescale(mbreaks), 
-                        colors = c("blue", "green4", "yellow", "orange", 
-                                   "blue")
-                        ) 
-# clustering
-hc <- hclust(dist(dm))
-dendro <- as.dendrogram(hc)
-setkey(months, month)
-dendro <- dendrapply(dendro, function(d) {
-  if (is.leaf(d)) {
-    labl <- attr(d, "label")
-    attr(d, "nodePar") <- list(month = as.numeric(labl),
-                               cal.month = months[labl, cal.month],
-                               year = months[labl, year]
-    )
-  }
-  d
+```{r}
+edges <- bats.div[delta == 1, .(id.i, id.j, depth)]
+vertices <- unique(bats[, .(id, month, cal.month, depth)])
+vertices[, depth := as.character(depth)]
+graph <- graph_from_data_frame(edges, directed = FALSE, vertices)
+bats.depths <- unique(bats$depth)
+bats.depths <- bats.depths[order(as.numeric(bats.depths))]
+names(bats.depths) <- bats.depths
+fits <- lapply(bats.depths, function(de) {
+  d <- bats.div[depth == de]
+  dm <- MakeDistMatrix(d, "id.i", "id.j")
+  CoordCMDS(dm)
 })
-dendro <- tree_apply(dendro, function(node, children, depth, tree) {
-  if(!is.leaf(node)) {
-    # browser()
-    cal.month <- mean(sapply(children, function(n) {
-      attr(n, "nodePar")$cal.month
-    }))
-    # attr(node, "cal.month") <- cal.month
-    attr(node, "nodePar") <- append(attr(node, "nodePar"),
-                                    list(cal.month = cal.month))
-  }
-  node
-}, direction = "up")
-layout <- create_layout(dendro, "dendrogram", circular = TRUE)
-p2 <- ggraph(layout) +
-  # geom_edge_link2(aes(color = node.cal.month)) +
-  geom_edge_elbow(aes(color = node2.cal.month)) +
-  scale_edge_color_gradientn(values = scales::rescale(mbreaks), 
-                        colors = c("blue", "green4", "yellow", "orange", 
-                                   "blue")) +
-  theme_graph(base_family = "Helvetica") +
-  geom_node_point(aes(filter = leaf, color = cal.month, shape = year),
-                  size = 1) +
-  scale_color_gradientn(values = scales::rescale(mbreaks), 
-                        colors = c("blue", "green4", "yellow", "orange", 
-                                   "blue")) +
-  theme_graph(base_family = "Helvetica") +
-  theme(aspect.ratio = 1, legend.position = "none")
-plot_grid(p1, p2, nrow = 2, labels = "AUTO")
+xforms <- lapply(fits, function(x) {
+  x$points
+}) %>% rbindlist(use.names = TRUE, idcol = "depth")
+eigranks <- lapply(fits, function(x) {
+  x$eigrank
+}) %>% rbindlist(use.names = TRUE, idcol = "depth")
+eigranks[, depth := factor(depth, levels = bats.depths)]
 ```
-A: path layout now done with tSNE.
-2D distances no longer reflect Jensen-Shannon distance, but neighbor adjacency should be more accurate.
-
+```{r bats-state-plots,fig.width=7,fig.height=9}
+setkey(xforms, sample)
+lo <- create_layout(graph, "manual", node.positions = xforms[V(graph)$name])
+mbreaks <- c(1, 3, 6, 9, 12) # Jan, plus months of solstices + equinoxes
+ggraph(lo) +
+  geom_edge_link(arrow = arrow(type = "closed", length = unit(3, "points")),
+                 end_cap = square(length = 3, unit = "points"),
+                 edge_width = 0.2) +
+  geom_node_point(aes(color = cal.month), size = 0.5) +
+  scale_color_gradientn(values = scales::rescale(mbreaks),
+                        colors = c("blue", "green4", "yellow", "orange",
+                                   "blue")
+                        ) +
+  facet_wrap(~ depth, ncol = 3) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+# dm <- dcast(month.div, month.i ~ month.j, value.var = "distance")
+# rn <- dm[, month.i]
+# dm <- as.matrix(dm[, -1])
+# rownames(dm) <- rn
+# # layout <- create_layout_tsne(graph, dm, 1)
+# # layout <- create_layout_nmds(graph, dm, trace = 0)
+# p1 <- ggraph(layout) +
+#   geom_edge_link(arrow = arrow(type = "closed", 
+#                                length = unit(5, "points")),
+#                  edge_width = 0.2,
+#                  end_cap = square(length = 5, unit = "points")
+#                  ) +
+#   geom_node_point(aes(color = cal.month, shape = year)) +
+#   theme_graph(base_family = "Helvetica") +
+#   guides(shape = guide_legend(ncol = 2)) +
+#   scale_color_gradientn(values = scales::rescale(mbreaks), 
+#                         colors = c("blue", "green4", "yellow", "orange", 
+#                                    "blue")
+#                         ) 
+# # clustering
+# hc <- hclust(dist(dm))
+# dendro <- as.dendrogram(hc)
+# setkey(months, month)
+# dendro <- dendrapply(dendro, function(d) {
+#   if (is.leaf(d)) {
+#     labl <- attr(d, "label")
+#     attr(d, "nodePar") <- list(month = as.numeric(labl),
+#                                cal.month = months[labl, cal.month],
+#                                year = months[labl, year]
+#     )
+#   }
+#   d
+# })
+# dendro <- tree_apply(dendro, function(node, children, depth, tree) {
+#   if(!is.leaf(node)) {
+#     # browser()
+#     cal.month <- mean(sapply(children, function(n) {
+#       attr(n, "nodePar")$cal.month
+#     }))
+#     # attr(node, "cal.month") <- cal.month
+#     attr(node, "nodePar") <- append(attr(node, "nodePar"),
+#                                     list(cal.month = cal.month))
+#   }
+#   node
+# }, direction = "up")
+# layout <- create_layout(dendro, "dendrogram", circular = TRUE)
+# p2 <- ggraph(layout) +
+#   # geom_edge_link2(aes(color = node.cal.month)) +
+#   geom_edge_elbow(aes(color = node2.cal.month)) +
+#   scale_edge_color_gradientn(values = scales::rescale(mbreaks), 
+#                         colors = c("blue", "green4", "yellow", "orange", 
+#                                    "blue")) +
+#   theme_graph(base_family = "Helvetica") +
+#   geom_node_point(aes(filter = leaf, color = cal.month, shape = year),
+#                   size = 1) +
+#   scale_color_gradientn(values = scales::rescale(mbreaks), 
+#                         colors = c("blue", "green4", "yellow", "orange", 
+#                                    "blue")) +
+#   theme_graph(base_family = "Helvetica") +
+#   theme(aspect.ratio = 1, legend.position = "none")
+# plot_grid(p1, p2, nrow = 2, labels = "AUTO")
+```
 We see that spring is quite reproduceable, almost all points clustering
 in the upper left-hand corner, only 2 branches away from root.
 Winter by contrast is all over the place, sometimes clustering with
@@ -210,6 +223,12 @@ Overall, one could argue that the two root-level branches could be
 characterized as "spring" and "summer," with winter and fall forming
 sub-branches within them. 
 
+```{r,bats-jsd-eig}
+ggplot(eigranks, aes(x = rank, y = value ^2)) +
+  geom_point() +
+  scale_x_log10() +
+  facet_wrap(~ depth, scales = "free_y")
+```
 ## Coarse-graining states
 Let the depth = 1 node ID be the state label of each time point
 ```{r bats-states-coarsegrain}
