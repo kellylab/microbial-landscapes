@@ -105,7 +105,7 @@ bats[, .(month = as.numeric(month),
   geom_bar(aes(fill = year)) +
   scale_x_discrete(limits = as.character(1:12))
 ```
-```{r}
+```{r bats-jsd-mds}
 edges <- bats.div[delta == 1, .(id.i, id.j, depth)]
 vertices <- unique(bats[, .(id, month, cal.month, depth)])
 vertices[, depth := as.character(depth)]
@@ -113,9 +113,11 @@ graph <- graph_from_data_frame(edges, directed = FALSE, vertices)
 bats.depths <- unique(bats$depth)
 bats.depths <- bats.depths[order(as.numeric(bats.depths))]
 names(bats.depths) <- bats.depths
-fits <- lapply(bats.depths, function(de) {
+bats.dms <- lapply(bats.depths, function(de) {
   d <- bats.div[depth == de]
-  dm <- MakeDistMatrix(d, "id.i", "id.j")
+  MakeDistMatrix(d, "id.i", "id.j")
+})
+fits <- lapply(bats.dms, function(dm) {
   CoordCMDS(dm)
 })
 xforms <- lapply(fits, function(x) {
@@ -126,7 +128,7 @@ eigranks <- lapply(fits, function(x) {
 }) %>% rbindlist(use.names = TRUE, idcol = "depth")
 eigranks[, depth := factor(depth, levels = bats.depths)]
 ```
-```{r bats-state-plots,fig.width=7,fig.height=9}
+```{r bats-path-plots,fig.width=7,fig.height=9}
 setkey(xforms, sample)
 lo <- create_layout(graph, "manual", node.positions = xforms[V(graph)$name])
 mbreaks <- c(1, 3, 6, 9, 12) # Jan, plus months of solstices + equinoxes
@@ -142,67 +144,61 @@ ggraph(lo) +
   facet_wrap(~ depth, ncol = 3) +
   theme_graph(base_family = "Helvetica") +
   theme(aspect.ratio = 1)
-# dm <- dcast(month.div, month.i ~ month.j, value.var = "distance")
-# rn <- dm[, month.i]
-# dm <- as.matrix(dm[, -1])
-# rownames(dm) <- rn
-# # layout <- create_layout_tsne(graph, dm, 1)
-# # layout <- create_layout_nmds(graph, dm, trace = 0)
-# p1 <- ggraph(layout) +
-#   geom_edge_link(arrow = arrow(type = "closed", 
-#                                length = unit(5, "points")),
-#                  edge_width = 0.2,
-#                  end_cap = square(length = 5, unit = "points")
-#                  ) +
-#   geom_node_point(aes(color = cal.month, shape = year)) +
-#   theme_graph(base_family = "Helvetica") +
-#   guides(shape = guide_legend(ncol = 2)) +
-#   scale_color_gradientn(values = scales::rescale(mbreaks), 
-#                         colors = c("blue", "green4", "yellow", "orange", 
-#                                    "blue")
-#                         ) 
-# # clustering
-# hc <- hclust(dist(dm))
-# dendro <- as.dendrogram(hc)
-# setkey(months, month)
-# dendro <- dendrapply(dendro, function(d) {
-#   if (is.leaf(d)) {
-#     labl <- attr(d, "label")
-#     attr(d, "nodePar") <- list(month = as.numeric(labl),
-#                                cal.month = months[labl, cal.month],
-#                                year = months[labl, year]
-#     )
-#   }
-#   d
-# })
-# dendro <- tree_apply(dendro, function(node, children, depth, tree) {
-#   if(!is.leaf(node)) {
-#     # browser()
-#     cal.month <- mean(sapply(children, function(n) {
-#       attr(n, "nodePar")$cal.month
-#     }))
-#     # attr(node, "cal.month") <- cal.month
-#     attr(node, "nodePar") <- append(attr(node, "nodePar"),
-#                                     list(cal.month = cal.month))
-#   }
-#   node
-# }, direction = "up")
-# layout <- create_layout(dendro, "dendrogram", circular = TRUE)
-# p2 <- ggraph(layout) +
-#   # geom_edge_link2(aes(color = node.cal.month)) +
-#   geom_edge_elbow(aes(color = node2.cal.month)) +
-#   scale_edge_color_gradientn(values = scales::rescale(mbreaks), 
-#                         colors = c("blue", "green4", "yellow", "orange", 
-#                                    "blue")) +
-#   theme_graph(base_family = "Helvetica") +
-#   geom_node_point(aes(filter = leaf, color = cal.month, shape = year),
-#                   size = 1) +
-#   scale_color_gradientn(values = scales::rescale(mbreaks), 
-#                         colors = c("blue", "green4", "yellow", "orange", 
-#                                    "blue")) +
-#   theme_graph(base_family = "Helvetica") +
-#   theme(aspect.ratio = 1, legend.position = "none")
-# plot_grid(p1, p2, nrow = 2, labels = "AUTO")
+```
+```{r bats-dendro-plots, fig.width=7,fig.height=10}
+# clustering
+bats.info[, month := as.character(month)]
+setkey(bats.info, month)
+bats.dendros <- lapply(bats.dms, function(dm) {
+  hc <- hclust(dist(dm))
+  dendro <- as.dendrogram(hc)
+  dendro <- dendrapply(dendro, function(d) {
+    if (is.leaf(d)) {
+      labl <- attr(d, "label")
+      mo <- strsplit(labl, "_")[[1]][1]
+      cal.month <- unique(bats.info[mo, cal.month]) # for multiple passes/mo
+      year <- unique(bats.info[mo, year]) # for multiple passes/mo
+      attr(d, "nodePar") <- list(month = as.numeric(mo),
+                                 cal.month = cal.month,
+                                 year = year
+      )
+    }
+    d
+  })
+  dendro <- tree_apply(dendro, function(node, children, depth, tree) {
+    if(!is.leaf(node)) {
+      child.months <- sapply(children, function(n) {
+        attr(n, "nodePar")$cal.month
+      })
+      cal.month <- mean(child.months)
+      attr(node, "nodePar") <- append(attr(node, "nodePar"),
+                                      list(cal.month = cal.month))
+    }
+    node
+  }, direction = "up")
+  dendro
+})
+bats.los <- lapply(bats.dendros, function(dendro) {
+  create_layout(dendro, "dendrogram", circular = TRUE)
+})
+bats.dendrographs <- lapply(bats.los, function(layout) {
+  ggraph(layout) +
+    geom_edge_elbow(aes(color = node2.cal.month)) +
+    scale_edge_color_gradientn(values = scales::rescale(mbreaks),
+                          colors = c("blue", "green4", "yellow", "orange",
+                                     "blue")) +
+    theme_graph(base_family = "Helvetica") +
+    geom_node_point(aes(filter = leaf, color = cal.month, 
+                        shape = as.character(year)),
+                    size = 1) +
+    scale_color_gradientn(values = scales::rescale(mbreaks),
+                          colors = c("blue", "green4", "yellow", "orange",
+                                     "blue")) +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1, legend.position = "none")
+})
+plot_grid(plotlist = bats.dendrographs, labels = names(bats.dendrographs),
+          ncol = 3)
 ```
 We see that spring is quite reproduceable, almost all points clustering
 in the upper left-hand corner, only 2 branches away from root.
