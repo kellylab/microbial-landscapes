@@ -226,75 +226,69 @@ ggplot(eigranks, aes(x = rank, y = value ^2)) +
 Let the depth = 1 node ID be the state label of each time point
 ```{r bats-states-coarsegrain}
 # create a unique ID for each state at depth = 2 and propagate down 
-states <- tree_apply(den_to_igraph(dendro), 
-                     function(node, parent, depth, tree, th = 2) {
-  if (depth < th) {
-    state <- NA
-  } else if (depth == th) {
-    state <- V(tree)$name[node]
-  } else if (depth > th) {
-    state <- V(tree)$state[parent]
-  }
-  tree <- set_vertex_attr(tree, "state", node, state)
-  tree
-})
-# map states to leaves
-states <- data.table(name = V(states)$name,
-                     state = V(states)$state,
-                     leaf = V(states)$leaf,
-                     month = as.character(V(states)$month),
-                     year = V(states)$year,
-                     cal.month = V(states)$cal.month)
-setkey(states, month)
-# propagate states back up through branch points from leaves
-dendro <- tree_apply(dendro, function(node, children, depth, tree) {
-  np <- attr(node, "nodePar")
-  if (is.leaf(node)) {
-    # browser()
-    mo <- as.character(attr(node, "nodePar")$month)
-    # if (mo %in% c("39", "28", "52")) {
-    #   browser()
-    # }
-    state <- states[mo, state]
-  } else {
-    child.states <- unique(sapply(children, function(c) {
-      attr(c, "nodePar")$state
-    })) 
-    if (length(child.states) == 1 & !anyNA(child.states)) {
-      state <- child.states
+bats.dendros <- lapply(bats.dendros, function(dendro, thresh = 2) {
+  # propagate up
+  dendro <- tree_apply(dendro, function(node, children, depth, tree, th = thresh) {
+    if (is.leaf(node)) {
+      mo <- strsplit("_", attr(node, "label"))[[1]][[1]]
+      state <- attr(node, "label")
     } else {
-      state <- NA
+      if (depth >= th) {
+        child.states <- sapply(children, function(d) attr(d, "nodePar")$state)
+        # take the first child state as branch state
+        state <- child.states[[1]]
+      } else {
+        state <- NA
+      }
     }
-  }
-  attr(node, "nodePar") <- append(np, list(state = state))
-  node
-}, direction = "up")
+    if (is.null (state)) browser()
+    attr(node, "nodePar") <- append(attr(node, "nodePar"), list(state = state))
+    node
+  }, direction = "up")
+  # propagate down
+  dendro <- tree_apply(dendro, function(node, parent, depth, tree, th = thresh) {
+    if (depth > th) {
+      parstate <- attr(parent, "nodePar")$state
+      attr(node, "nodePar")$state <- parstate
+    }
+    node
+  })
+  dendro
+})
 ```
 ```{r bats-states-coarsegrain-probability,fig.width=7,fig.height=9}
-states[, month := as.character(month)]
-states[, cal.month := factor(as.character(cal.month), 
-                             levels = as.character(seq(1:12)))]
-p1 <- ggraph(dendro, "dendrogram", circular = TRUE) +
+pl.bats.states <- lapply(bats.dendros, function(dendro) {
+  ggraph(dendro, "dendrogram", circular = TRUE) +
   geom_edge_elbow(aes(color = node2.state)) +
-  geom_node_point(aes(filter = leaf, color = cal.month, shape = year)) +
+  geom_node_point(aes(filter = leaf, 
+                      color = cal.month),
+                  size = 1
+                  )+
   theme_graph(base_family = "Helvetica") +
-  theme(aspect.ratio = 1) + 
+  theme(aspect.ratio = 1, legend.position = "none") + 
   scale_color_gradientn(values = scales::rescale(mbreaks),
                         colors = c("blue", "green4", "yellow", "orange",
                                    "blue")) +
   guides(shape = guide_legend(ncol = 2),
          edge_colour = guide_legend(ncol = 2))
-p2 <- ggplot(states[leaf == TRUE], aes(x = state)) +
-  geom_bar(aes(fill = cal.month))  +
-  guides(fill = guide_legend(ncol = 2))
-states[, month := as.numeric(month)]
-setorder(states, month)
-p3 <- ggplot(states[leaf == TRUE], aes(x = month, y = state)) + 
-  geom_path(aes(group = 0)) + 
-  geom_point(aes(color = cal.month, shape = year)) +
-  theme(legend.position = "bottom")
-  # guides(color = guide_legend(ncol = 2))
-plot_grid(p1, p2, p3, labels = "AUTO", nrow = 3, rel_heights = c(2, 0.8, 1))
+})
+plot_grid(plotlist = pl.bats.states, ncol = 3, labels = names(pl.bats.states))
+bats.samps2states <- lapply(bats.dendros, function(dendro) {
+  graf <- den_to_igraph(dendro)
+  islf <- V(graf)$leaf
+  yr <- V(graf)$year[islf]
+  mo <- V(graf)$month[islf]
+  cm <- V(graf)$cal.month[islf]
+  st <- V(graf)$state[islf]
+  data.table(month = mo, year = yr, cal.month = cm, state = st)
+}) %>% rbindlist(idcol = "depth")
+ggplot(bats.samps2states, aes(x = cal.month, y = state, 
+                              color = as.character(year))) +
+  geom_line(aes(group = year)) +
+  # geom_jitter(width = 0, height = 0.3) +
+  labs(color = "year") +
+  # theme(legend.position = "bottom") +
+  facet_wrap(~ depth, scales = "free_y", ncol = 2)
 ```
 
 
