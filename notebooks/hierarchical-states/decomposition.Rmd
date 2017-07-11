@@ -28,14 +28,18 @@ source("load_data.R")
 # Prochloroccocus
 
 ## BATS
-
-```{r bats-spectral,fig.width=7,fig.height=7}
+Raw relative abundance time series of ecotypes at depths:
+```{r bats-ts,fig.width=7,fig.height=7}
 bats[, rel.abund := abundance / sum(abundance), by = depth]
 bats[, log.rel.abund := log10(rel.abund)]
 ggplot(bats, aes(x = month, y = log.rel.abund)) +
   geom_path(aes(group = ecotype)) +
   facet_grid(depth ~ ecotype) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+Power spectrum of ecotypes at depths:
+```{r bats-spec, fig.asp=1}
 # spectral analysis per ecotype per depth
 # mean per month if more than one sample
 bats.depthlra <- bats[, .(mn = mean(log.rel.abund)), 
@@ -54,6 +58,11 @@ ggplot(bats.spec, aes(x = timescale.months, y = spec)) +
   geom_vline(aes(linetype = "12"), xintercept = 12, color = "blue") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 ```
+Blue line indicates periodicity of 1 year.
+Relative height of peaks gives relative magnitude of periodic fluctuations at that time scale.
+This shows that not all ecotypes at all depths are most strongly driven by annual cycling.
+E.g. e9312 apparently experiences strong annual cycling at all depths except 100.
+NATL experiences annual cycling at all depths but it is relatively weaker at depths 160-200.
 
 ## State clustering with JSD
 ```{r bats-states}
@@ -94,21 +103,9 @@ bats.div[, ":=" (month.i = as.numeric(month.i),
                  month.j = as.numeric(month.j))]
 bats.div[, delta := month.j - month.i]
 ```
-Number of months representing each calendar month:
-```{r bats-cal-month-samples}
-bats[, .(month = as.numeric(month), 
-              cal.month = as.character(cal.month),
-              day)] %>% 
-  unique() %>% 
-  mutate(year = as.character(floor(month / 12))) %>% 
-  ggplot(aes(x = cal.month)) +
-  geom_bar(aes(fill = year)) +
-  scale_x_discrete(limits = as.character(1:12))
-```
 ```{r bats-jsd-mds}
-edges <- bats.div[delta == 1, .(id.i, id.j, depth)]
 vertices <- unique(bats[, .(id, month, cal.month, depth)])
-vertices[, depth := as.character(depth)]
+edges <- bats.div[delta == 1, .(id.i, id.j, depth = as.numeric(depth))]
 graph <- graph_from_data_frame(edges, directed = FALSE, vertices)
 bats.depths <- unique(bats$depth)
 bats.depths <- bats.depths[order(as.numeric(bats.depths))]
@@ -145,6 +142,45 @@ ggraph(lo) +
   theme_graph(base_family = "Helvetica") +
   theme(aspect.ratio = 1)
 ```
+
+This also shows that seasonal cycling is more reproducible at some depths.
+For depths shallower than 100, there seems to be a reproducible path, and the composition seems to change more gradually, as can be seen in the close spacing of most consecutive timepoints.
+For depths 120-160, there are also reproducible paths, however, there are 3 clusters of time points (seemingly representing spring, summer/early fall, and late fall/winter) with large gaps between them, and the long leaps between clusters suggests the seasonal compositional transitions are more drastic.
+Finally, depths 180-200 appear more random.
+
+Eigenvalues of MDS show that this transformation captures most of the information:
+```{r,bats-jsd-eig}
+ggplot(eigranks, aes(x = rank, y = value ^2)) +
+  geom_point() +
+  scale_x_log10() +
+  facet_wrap(~ depth, scales = "free_y")
+```
+
+Heatmapping the JSDs shows occupancy of stable states as dark squares of high temporal similarity along the diagonal.
+Recurrence of stable states show as dark off-diagonal rectangles.
+It is clear the time scales of stability (sizes of on-diagonal dark squares) are different for depths 1-40 and 100-160.
+60-80 seem to be a hybrid of the two regimes, and 180-200 seem to go toward randomness.
+```{r bats-tile,fig.asp=1.5}
+bats.div[, depth := as.numeric(depth)]
+ggplot(bats.div, aes(x = month.i, y = month.j)) +
+  geom_tile(aes(fill = jsd)) + 
+  facet_wrap(~ depth, ncol = 3) + 
+  theme(aspect.ratio = 1)
+```
+
+David-style, JSD-based 'autocorrelation.'
+The periodicity of many of the autocorrelation functions shows strong periodic dynamics at a single time scale.
+```{r bats-autocorr,fig.asp=1}
+ggplot(bats.div[delta > 0], aes(x = delta, y = jsd)) +
+  geom_point(size = 0.2) +
+  geom_smooth() +
+  facet_wrap(~ depth, ncol = 3) 
+```
+
+### Dendrogram
+
+For this dataset, the path plots might actually make the point more clearly/convincingly than the dendrogram wheels.
+
 ```{r bats-dendro-plots, fig.width=7,fig.height=10}
 # clustering
 bats.info[, month := as.character(month)]
@@ -183,10 +219,11 @@ bats.los <- lapply(bats.dendros, function(dendro) {
 })
 bats.dendrographs <- lapply(bats.los, function(layout) {
   ggraph(layout) +
-    geom_edge_elbow(aes(color = node2.cal.month)) +
-    scale_edge_color_gradientn(values = scales::rescale(mbreaks),
-                          colors = c("blue", "green4", "yellow", "orange",
-                                     "blue")) +
+    geom_edge_elbow() +
+    # geom_edge_elbow(aes(color = node2.cal.month)) +
+    # scale_edge_color_gradientn(values = scales::rescale(mbreaks),
+    #                       colors = c("blue", "green4", "yellow", "orange",
+    #                                  "blue")) +
     theme_graph(base_family = "Helvetica") +
     geom_node_point(aes(filter = leaf, color = cal.month, 
                         shape = as.character(year)),
@@ -200,30 +237,11 @@ bats.dendrographs <- lapply(bats.los, function(layout) {
 plot_grid(plotlist = bats.dendrographs, labels = names(bats.dendrographs),
           ncol = 3)
 ```
-We see that spring is quite reproduceable, almost all points clustering
-in the upper left-hand corner, only 2 branches away from root.
-Winter by contrast is all over the place, sometimes clustering with
-late fall, other times with spring.
-It could be that winter has no characteristic state of its own but simply
-represents an intermediate between fall and spring.
-Perhaps it can be thought of as an `unstable intermediate' between the
-other two seasons.
-Fall also spreads out a bit, though there is one 4th-level (root = 0) branch
-around 4-5 o'clock that seems to be mostly fall points.
-Winter and fall do seem to cluster together sometimes (1, 5-6 o'clock).
-Overall, one could argue that the two root-level branches could be 
-characterized as "spring" and "summer," with winter and fall forming
-sub-branches within them. 
 
-Eigenvalues of MDS:
-```{r,bats-jsd-eig}
-ggplot(eigranks, aes(x = rank, y = value ^2)) +
-  geom_point() +
-  scale_x_log10() +
-  facet_wrap(~ depth, scales = "free_y")
-```
 ## Coarse-graining states
-Let the depth = 1 node ID be the state label of each time point
+Let the depth = 1 node ID be the state label of each time point.
+Again, this method doesn't seem to give much extra information for this dataset.
+Perhaps there's some other way to do this.
 ```{r bats-states-coarsegrain}
 # create a unique ID for each state at depth = 2 and propagate down 
 bats.dendros <- lapply(bats.dendros, function(dendro, thresh = 2) {
@@ -293,7 +311,12 @@ ggplot(bats.samps2states, aes(x = cal.month, y = state,
 
 
 # Nahant
-```{r nahant-ts, fig.width=7,fig.height=6}
+
+There are too many OTUs.
+They should probably be aggregated somehow.
+Here we aggregate all reads that map to the same phylum, which results in a manageable number of variables.
+But one could just as well aggregate at any other taxonomic level or not at all.
+```{r}
 nahant.bac <- fread(paste0(data.dir, "BactNorm.txt"), header = TRUE)
 nahant.bac <- melt(nahant.bac, id.vars = c("OTU", "ConsensusLineage"), 
                    variable.name = "day")
@@ -311,10 +334,12 @@ nahant.bac <- nahant.bac[, foo := NULL]
 # there are way too many classes and finer, plot time series of phyla
 phyla <- nahant.bac[kingdom != "" & phylum != "", .(freq = sum(freq)), 
            by = .(day, phylum)] 
+```
+```{r nahant-ts, fig.asp=1}
 phyla %>% 
   group_by(phylum) %>% 
   mutate(freq = scales::rescale(freq)) %>% 
-  ggplot(aes(x = day, y = freq)) +
+  ggplot(aes(x = as.numeric(day), y = freq)) +
   theme(strip.text = element_text(size = 10),
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
         ) +
@@ -341,17 +366,6 @@ phyla.spec %>%
   ggplot(aes(x = freq, y = phylum)) +
   labs(x = "frequency (1/day)") +
   geom_tile(aes(fill = value)) 
-```
-
-```{r nahant-phyla-entropy}
-# entropy of power spectrum per phylum
-library(entropy)
-phyla.ent <- phyla.spec[, .(entropy = entropy(discretize(value, 10), 
-                                              unit = "log2")), 
-                        by = phylum]
-ggplot(phyla.ent, aes(x = entropy)) +
-  guides(fill = guide_legend(ncol = 1)) +
-  geom_histogram(aes(fill = phylum), binwidth = 0.1)
 ```
 
 # R there statez?
@@ -421,8 +435,10 @@ p2 <- ggraph(dendro, "dendrogram") +
   # theme(aspect.ratio = 1)
 plot_grid(p1, p2, nrow = 2, align = "hv", labels = c("A", "B"))
 ```
+These data show a clear transition between stable states around day 240.
+These two states form the two major branches at the lowest level of the hierarchical clustering.
 
-The eigenvalues of the MDS transform:
+The eigenvalues of the MDS transform show that information is well preserved:
 ```{r bats-mds-eigen}
 ggplot(fit$eigrank, aes(x = rank, y = value ^ 2)) +
   geom_point()
@@ -434,7 +450,7 @@ ggplot(fit$eigrank, aes(x = rank, y = value ^ 2)) +
 Distribution of daily compositional step sizes.
 The Maxwell-Boltzmann/lognormal shape to the density at $\Delta(t) = 1$ 
 suggests that under this time resolution the change in composition behaves
-like some kind of random walk?
+like some kind of random walk, with a characteristic step size and rare changes of larger magnitude.
 ```{r nahant-day-deltas, fig.width=7,fig.height=6}
 day.div <- day.div[, day.delta := as.numeric(day.j) - as.numeric(day.i)]
 p1 <- ggplot(day.div[day.delta == 1,], aes(x = distance)) +
@@ -462,6 +478,7 @@ Compositional distance as function of interval.
 This is sort of an autocorrelation spectrum.
 There are no peaks in this 'spectrum' suggesting there are no characteristic
 time scales of periodic behavior.
+Since there is only one major state transition in these data, it could also be interpreted as the period of state transitions being longer than the observation time, when interpreted as periodic.
 ```{r nahant-sim-interval, fig.width=7, fig.height=5}
 br <- days[seq(1, length(days), by = 5)]
 ggplot(day.div, aes(x = day.i, y = day.j)) +
@@ -478,12 +495,6 @@ p1 <- p0 + geom_point(size = 1) +
   labs(linetype = "", x = "interval (days)")
 p2 <- p0 + stat_bin_2d(binwidth = c(1, 0.01)) + labs(x = "interval (days)")
 plot_grid(p1, p2, nrow = 2, align = "hv", labels = "AUTO")
-# FT of 'autocorrelation' is power spectrum
-spec <- stats::spectrum(ts(data = tl$mn.dist), plot = FALSE)
-data.table(freq = spec$freq, spec = spec$spec) %>% 
-  ggplot(aes(x = freq, y = spec)) +
-  geom_line() +
-  scale_y_log10() 
 ```
 
 # Human
@@ -547,6 +558,7 @@ david.div[subject.i == subject.j, increment := subj.idx.j - subj.idx.i]
 Merge event metadata:
 ```{r}
 # metadata
+setkey(david.samples, subject)
 events <- mapply(function(start, end, subject, event) {
   x <- data.table(day = seq(start, end, by = 1), subject = subject, 
                   event = event)
@@ -571,12 +583,10 @@ david.div <- merge(david.div, unique.day.events, by.x = c("subject.i", "day.i"),
 david.div <- merge(david.div, unique.day.events, by.x = c("subject.j", "day.j"),
                    by.y = c("subject", "day"), suffixes = c(".i", ".j"))
 ```
+
+The magnitudes of day-to-day changes in composition don't reflect significant events.
 ```{r david-stepsizes-day}
 setkey(david.div, subject.i, subject.j)
-david.div[subject.i == subject.j & day.delta == 1] %>% 
-  ggplot(aes(x = distance)) +
-  geom_histogram(binwidth = 0.01) +
-  facet_wrap(~ subject.i, nrow = 2)
 event.lims <- events[, .(start = min(day), end = max(day)), 
                      by = .(event, subject)]
 event.lims <- event.lims[!grepl("pre", event) & !grepl("post", event)]
@@ -606,13 +616,6 @@ dens <- p0 + stat_density(aes(fill = subject.i), alpha = 0.5,
                           position = "identity") +
   theme(aspect.ratio = ar)
 plot_grid(cdf, dens, nrow = 2, align = "v")
-```
-```{r, david-time-vs-distance,fig.width=6,fig.height=5}
-ggplot(david.div[subject.i == subject.j & day.delta > 0], 
-       aes(x = distance, y = day.delta)) +
-  stat_bin_2d() +
-  labs(y = "interval") +
-  facet_wrap(~ subject.i, nrow = 2)
 ```
 
 ### Paths
@@ -661,6 +664,10 @@ p2 <- ggraph(lo) +
   theme(aspect.ratio = 1)
 plot_grid(p1, p2, nrow = 2, align = "v")
 ```
+Laying both subjects along the same axes we see each subject is more similar to themselves than they are to the other subject, for the most part.
+The upper right represents states in which the two subjects resembled each other.
+Interestingly not all these points seem to be close in time.
+Subject B makes a brief excursion to a Subject A-like state post Salmonella.
 
 Eigenvalues by rank:
 ```{r david-eigen-rank}
@@ -673,6 +680,8 @@ ggplot(fit$eigrank, aes(x = rank, y = value ^ 2)) +
 ### Trees
 
 #### Together
+
+Hierarchical clustering reveals 3 major branches: characteristic of Subject A, characteristic of Subject B, and Shared Outlier State. 
 ```{r david-merged-tree,fig.width=7,fig.height=20}
 dm <- dcast(david.div, sample.i ~ sample.j, value.var = "distance")
 rn <- dm$sample.i
@@ -708,6 +717,8 @@ ggraph(dendro, "dendrogram") +
 ```
 
 #### Separate
+Clustering separately shows that Subject B has distinct pre- and post-Salmonella states, but the various events in Subject A's life didn't create alternate stable states that were significantly different.
+
 ```{r david-event-trees,fig.height=9,fig.width=7}
 setkey(david.div, subject.i, subject.j)
 dendros <- lapply(david.subjects, function(subj) {
@@ -773,16 +784,6 @@ Perhaps this is due to many OTUs remaining stable through the duration of travel
 
 Subject B shows clear pre- and post-Salmonella states, as reported in the original manuscript.
 Perhaps the post-Salmonella state is separate because of the extinction of cluster 4 (see original paper) during infection, rendering return to the pre-Salmonella state impossible?
-Notably, the first day of Salmonella clusters deep within the pre-Salmonella state, while the last days cluster closer to the post-Salmonella state.
-Salmonella infection may thus represent an unstable intermediate position between the two stable states on the compositional landscape.
-This agrees with the description in the original manuscript of Salmonella infection being a path that rolls up the side of one basin of stability and down into another; clinical symptoms emerge, as determined by the metadata, when the composition is still somewhat similar to the pre-disease state.
-Likewise, the end of infection is not declared until after the composition has begun to converge on its post-infection state.
-
-Perhaps notably, the first Salmonella day clusters closer to some of the earliest pre-Salmonella points than some others that are closer in time.
-Does this mean that, at the beginning of the series, Subject B was actually in a "Salmonella-prone" state, but no infection occurred?
-Or is the perturbation by invading Salmonella so strong that infection onset depends little on the composition?
-In other words, does the cluster around the first Salmonella point represent a relatively unstable region within the pre-infection state, or is it in fact
-equally stable, just not against Salmonella invasion?
 
 ## Gordon et al (cholera)
 ```{r}
@@ -851,10 +852,11 @@ setnames(inv, names(inv), sapply(names(inv), function(x) {
 }))
 gordon.div <- rbind(gordon.div, inv)
 gordon.div[, distance := sqrt(jsd)]
-gordon.div
 ```
 
-David-style divergence matrices:
+David-style divergence matrices.
+Dark on-diagonal squares represent occupation of stable states.
+Most patients have distinct stable states.
 ```{r gordon-div-matrices,fig.width=7,fig.height=7}
 setkey(gordon.div, subject.i, subject.j)
 subjects <- sort(subjects)
@@ -892,6 +894,10 @@ plot_grid(plotlist = plots, align = "hv", labels = names(plots),
           nrow = 3)
 ```
 
+Distributions of divergences show that for all patients, diarrhea and recovery states are more similar to themselves than to each other (cross-state divergences are large).
+In most patients (except E) the recovery microbiome is actually less stable than the diarrhea microbiome: the diarrhea divergences tend to be smaller.
+**However** this could also be due to the denser temporal sampling during the diarrhea period.
+We should scale this by the time interval somehow, since it varies.
 ```{r gordon-dist-distrib}
 gordon.div[, state := {
   if (state.i == state.j) state.i
@@ -911,8 +917,7 @@ plot_grid(cdf, dens, nrow = 2, align = "v")
 ```
 
 ### Paths
-Running MDS on all subjects tends results in inter-subject variation dominating intra-subject cholera/recovery variation.
-Overall, the similarity between trajectories seen in the tICA analysis is not seen.
+MDS of all subjects simultaneously shows that diarrhea/recovery separates time points more than subject.
 ```{r gordon-paths}
 setkey(gordon.div, subject.i, subject.j)
 setkey(gordon.samples, subject)
@@ -960,7 +965,10 @@ ggraph(lo) +
 
 ### Tree
 
-All together:
+All together.
+Again separation is mostly diarrhea/recovery.
+However, some diarrhea points are closer to recovery points than they are to the majority of diarrhea points.
+This can also be seen in the last plot where the two 'clouds' enmesh.
 ```{r,fig.width=7,fig.height=7}
 dm <- dcast(gordon.div, sample.i ~ sample.j, value.var = "distance")
 rn <- dm[, sample.i] 
