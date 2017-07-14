@@ -1,0 +1,72 @@
+---
+title: "Bacterial-eukaryotic associations in Nahant"
+output: html_notebook
+---
+
+```{r setup}
+library(data.table)
+library(philentropy)
+library(infograf)
+
+data.dir <- "../../data/"
+
+bac <- fread(paste0(data.dir, "BactNorm.txt"), header = TRUE)
+setnames(bac, "ConsensusLineage", "Lineage")
+bac <- melt(bac, id.vars = c("OTU", "Lineage"),
+                   variable.name = "day")
+bac[, day := as.numeric(as.character(day))]
+bac[, value := as.numeric(value)]
+# merge OTU counts by consensus lineage
+bac <- bac[, .(freq = sum(value)), by = .(Lineage, day)]
+# parse lineage
+# nothing is mapped to species resolution
+bac[, Lineage := gsub(";", "", Lineage)]
+bac[, c("foo", "kingdom", "phylum", "class", "order", "family",
+                             "genus", "species") := tstrsplit(Lineage,
+                                                   "[[:alpha:]]__")]
+bac <- bac[, foo := NULL]
+
+euk <- fread(paste0(data.dir, "EukNorm.txt"), header = TRUE)
+euk <- melt(euk, id.vars = c("OTU", "Lineage"),
+                   variable.name = "day")
+euk[, day := as.numeric(as.character(day))]
+euk[, value := as.numeric(value)]
+# merge OTU counts by consensus lineage
+euk <- euk[, .(freq = sum(value)), by = .(Lineage, day)]
+# parse lineage
+euk[, Lineage := gsub(";", "", Lineage)]
+euk[, c("foo", "kingdom", "phylum", "class", "order", "family",
+                      "genus", "species") := tstrsplit(Lineage,
+                                            "[[:alpha:]]__")]
+euk[, foo := NULL]
+
+# set all unlabeled taxonomic levels to NA
+taxlvls <- c("kingdom", "phylum", "class", "order", "family", "genus", "species")
+for (lvl in taxlvls) {
+  bac[, eval(lvl) := {
+    v <- get(lvl)
+    v[v == "" | v == " " | is.na(v)] <- as.character(NA)
+    v
+  }]
+  euk[, eval(lvl) := {
+    v <- get(lvl)
+    v[v == "" | v == " " | is.na(v)] <- as.character(NA)
+    v
+  }]
+}
+```
+
+# Mutual information between eukaryotes and bacteria
+
+Aggregate frequencies:
+```{r}
+AggFreq <- function(level, dt, lvls) {
+  lvls <- lvls[1:which(lvls == level)]
+  b <- c(lvls, "day")
+  dt[, .(freq = sum(freq)), by = b]
+}
+level <- "class"
+bac.agg <- AggFreq(level, bac, taxlvls)
+euk.agg <- AggFreq(level, euk, taxlvls)
+```
+
