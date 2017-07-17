@@ -101,12 +101,16 @@ ggplot(mi, aes(x = eukaryote, y = bacteria)) +
 ## Comparison with null model
 Permute the eukaryote time series to make a null model.
 ```{r,message=FALSE}
+# PERMUTE EUKARYOTE DATA
+null.dt <- copy(all.dt)
+setkey(null.dt, kingdom)
+null.dt["Eukaryota", freq := sample(freq), by = label]
+setkey(null.dt, label)
 mi[, null.mi := {
-  dt <- all.dt[c(bacteria, eukaryote)]
+  dt <- null.dt[c(bacteria, eukaryote)]
   dt <- dcast(dt, day ~ label, value.var = "freq")
   # reject time points where one is NA
   dt <- dt[!is.na(get(bacteria)) & !is.na(get(eukaryote))]
-  # PERMUTE EUKARYOTE DATA
   dt[, c(eukaryote) := sample(dt[, get(eukaryote)])]
   natstobits(mutinformation(
     discretize(dt[, get(bacteria)]), 
@@ -123,6 +127,8 @@ ggplot(mi, aes(x = eukaryote, y = bacteria)) +
   coord_equal() +
   labs(fill = "null")
 ```
+
+The uncertainty-rank distribution for the null looks rather similar.
 ```{r}
 vs.null <- melt(mi, id.vars = c("bacteria", "eukaryote"),
                 measure.vars = patterns("uncertainty.bac"),
@@ -138,7 +144,7 @@ ggplot(vs.null, aes(x = rank, y = uncertainty)) +
   geom_jitter(aes(color = group), size = 0.5)  
 ```
 
-
+The probability of having a high uncertainty coefficient in the data compared to the null seems the same as the opposite.
 ```{r null-ubac-vs-real}
 ggplot(mi, aes(x = null.uncertainty.bac, y = uncertainty.bac)) +
   geom_point(size = 0.5) +
@@ -146,8 +152,4 @@ ggplot(mi, aes(x = null.uncertainty.bac, y = uncertainty.bac)) +
   coord_equal() +
   labs(x = "null", y = "U(bacteria|eukaryote)")
 ```
-
-
-
-
-
+The mutual information patterns in the data don't seem significantly different from the null.
