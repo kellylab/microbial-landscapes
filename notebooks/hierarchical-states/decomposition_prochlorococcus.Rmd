@@ -1,11 +1,11 @@
 ---
 title: "Decomposition of time scales in *Prochlorococcus* time series"
 output:
-  html_notebook: default
   html_document:
     toc: yes
     toc_depth: 2
     toc_float: yes
+  html_notebook: default
   pdf_document: default
 ---
 

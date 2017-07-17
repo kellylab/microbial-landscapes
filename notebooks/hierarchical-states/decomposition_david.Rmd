@@ -1,0 +1,304 @@
+---
+title: "Decomposition of states and time scales in 2 healthy human gut microbiomes"
+output: html_notebook
+---
+```{r}
+library(dplyr)
+library(data.table)
+library(cowplot)
+library(ggraph)
+library(igraph)
+source("utils.R")
+knitr::opts_chunk$set(
+  fig.path = "decomposition_nahant_figs/",
+  fig.keep = "high",
+  dev = c("pdf")
+)
+data.dir <- "../../data/"
+david <- fread(paste0(data.dir, "david/david.otus"), 
+               col.names = c("sample", "otu", "count")
+               )
+# parse subject and timepoints
+david.samples <- unique(david[, .(sample)])
+david.samples[, c("subject", "day") := tstrsplit(sample, "_")]
+# log transform otu counts
+david[, log.count := log(count + 1)]
+# split by subject
+david.subjects <- unique(david.samples$subject)
+names(david.subjects) <- david.subjects
+# create tables of day-day divergences
+```
+
+
+```{r,message=FALSE}
+david.div <- data.table(expand.grid(sample.i = david.samples$sample,
+                                    sample.j = david.samples$sample)
+                        )
+david.samples[, idx := 1:.N]
+david.samples[, subj.idx := frank(as.numeric(day)), by = subject]
+david.div <- merge(david.div, david.samples, by.x = "sample.i", 
+                   by.y = "sample")
+david.div <- merge(david.div, david.samples, by.x = "sample.j", 
+                   by.y = "sample", suffixes = c(".i", ".j"))
+david.div <- david.div[idx.j >= idx.i]
+setkey(david, sample)
+david.div[, jsd := {
+  if (sample.i == sample.j) {
+    0
+  } else {
+    sd <- david[c(sample.i, sample.j)]
+    m <- dcast(sd, otu ~ sample, value.var = "count")
+    m <- as.matrix(m[, 2:3])
+    m[is.na(m)] <- 0
+    genJSD(m)
+  }
+}, by = .(sample.i, sample.j)]
+# reciprocal distances
+david.div <- david.div[sample.i != sample.j] %>% 
+  setnames(names(david.div), sapply(names(david.div), function(x) {
+    if (grepl("idx\\.i", x)) {
+      gsub("idx\\.i", "idx\\.j", x)
+    } else if (grepl("idx\\.j", x)) {
+      gsub("idx\\.j", "idx\\.i", x)
+    } else if (grepl("\\.i", x)) {
+      gsub("\\.i", "\\.j", x)
+    } else if (grepl("\\.j", x)) {
+      gsub("\\.j", "\\.i", x)
+    } else x
+  })
+  ) %>%  
+  rbind(david.div)
+david.div[, distance := sqrt(jsd)]
+david.div[, day.delta := as.numeric(day.j) - as.numeric(day.i)]
+david.div[subject.i == subject.j, increment := subj.idx.j - subj.idx.i]
+```
+
+Merge event metadata:
+```{r}
+# metadata
+setkey(david.samples, subject)
+events <- mapply(function(start, end, subject, event) {
+  x <- data.table(day = seq(start, end, by = 1), subject = subject, 
+                  event = event)
+  x
+}, start = c(0, 71, 80, 104, 123, 
+             0, 151, 160 ),
+end =   c(70, 122, 85, 113, david.samples["A", max(as.numeric(day))], 
+          150, 159, david.samples["B", max(as.numeric(day))]),
+subject = c("A", "A", "A", "A", "A", 
+            "B", "B", "B"),
+event = c("US (pre)", "travel", "diarrhea 1", "diarrhea 2", "US (post)", 
+          "pre-Salmonella", "Salmonella", "post-Salmonella"),
+SIMPLIFY = FALSE) %>% rbindlist(use.names = TRUE) 
+# collapse event labels per day
+unique.day.events <- events[, .(event = paste(event, collapse = " + ")), 
+                           by = .(subject, day)]
+unique.day.events[, day := as.character(day)]
+david.samples <- merge(david.samples, unique.day.events, 
+                       by = c("subject", "day"))
+david.div <- merge(david.div, unique.day.events, by.x = c("subject.i", "day.i"),
+                   by.y = c("subject", "day"))
+david.div <- merge(david.div, unique.day.events, by.x = c("subject.j", "day.j"),
+                   by.y = c("subject", "day"), suffixes = c(".i", ".j"))
+```
+
+The magnitudes of day-to-day changes in composition don't reflect significant events.
+```{r david-stepsizes-day}
+setkey(david.div, subject.i, subject.j)
+event.lims <- events[, .(start = min(day), end = max(day)), 
+                     by = .(event, subject)]
+event.lims <- event.lims[!grepl("pre", event) & !grepl("post", event)]
+event.lims[, event := factor(levels = c("travel", "diarrhea 1", "diarrhea 2",
+                                        "Salmonella"), event)]
+david.div[subject.i == subject.j & day.delta == 1] %>% 
+  mutate(day.i = as.numeric(day.i)) %>% 
+  setnames("subject.i", "subject") %>% 
+  ggplot(aes(x = day.i, y = distance)) +
+  geom_rect(data = event.lims, 
+    mapping = aes(fill = event, xmin = start, xmax = end, 
+                  ymin = 0.1, ymax = 1.05
+                  ), inherit.aes = FALSE, alpha = 0.5) +
+  geom_point() +
+  facet_wrap(~ subject, nrow = 2)
+```
+
+Distributions of all distances for all time scales.
+We see that both length distributions are multimodal, indicating at least 2 compositional "length scales."
+We also see that the vast majority of A distances belong to the lowest mode, while the second lowest mode of B is as high as the lowest, indicating that subject B spends a significant amount of time (relative to the length of the entire measurement).
+```{r david-all-dist-distrib,fig.width=5,fig.height=5}
+p0 <- ggplot(david.div[subject.i == subject.j], aes(x = distance)) 
+ar <- 3 / 5
+cdf <- p0 + stat_ecdf(aes(color = subject.i)) + labs(y = "ECDF") +
+  theme(aspect.ratio = ar)
+dens <- p0 + stat_density(aes(fill = subject.i), alpha = 0.5, 
+                          position = "identity") +
+  theme(aspect.ratio = ar)
+plot_grid(cdf, dens, nrow = 2, align = "v")
+```
+
+### Paths
+```{r david-path-plots,fig.width=7,fig.height=7}
+david.subjects <- c("A", "B")
+names(david.subjects) <- david.subjects
+setkey(david.div, subject.i, subject.j)
+dm <- MakeDistMatrix(david.div, "sample.i", "sample.j")
+fit <- CoordCMDS(dm)
+xform <- fit$points
+setcolorder(xform, c("sample", "x", "y"))
+setkey(xform, sample)
+# put sample labels at first 2 columns
+setcolorder(david.div, c("sample.i", "sample.j",
+                         names(david.div)[!(names(david.div) %in%
+                                              c("sample.i", "sample.j"))])
+            )
+david.samples[, day := as.numeric(day)]
+setcolorder(david.samples, c("sample", "subject", "day", "event", "idx", 
+                             "subj.idx"))
+graf <- graph_from_data_frame(
+  david.div[subject.i == subject.j & increment == 1],
+  directed = TRUE,
+  vertices = david.samples
+  )
+setkey(xform, sample)
+xform <- xform[V(graf)$name]
+lo <- create_layout(graf, "manual", node.positions = xform)
+nsize <- 1
+p1 <- ggraph(lo) +
+  geom_edge_link(arrow = arrow(length = unit(3, "points"), type = "closed"),
+                 end_cap = square(length = 3, unit = "points"),
+                 edge_width = 0.2) +
+  geom_node_point(aes(color = day), size = nsize) +
+  scale_color_distiller(palette = "Blues") +
+  facet_nodes(~ subject) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+p2 <- ggraph(lo) +
+  geom_edge_link(arrow = arrow(length = unit(3, "points"), type = "closed"),
+                 end_cap = square(length = 3, unit = "points"),
+                 edge_width = 0.2) +
+  geom_node_point(aes(color = event), size = nsize) +
+  facet_nodes(~ subject) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+plot_grid(p1, p2, nrow = 2, align = "v")
+```
+Laying both subjects along the same axes we see each subject is more similar to themselves than they are to the other subject, for the most part.
+The upper right represents states in which the two subjects resembled each other.
+Interestingly not all these points seem to be close in time.
+Subject B makes a brief excursion to a Subject A-like state post Salmonella.
+
+Eigenvalues by rank:
+```{r david-eigen-rank}
+ggplot(fit$eigrank, aes(x = rank, y = value ^ 2)) +
+  geom_point()
+```
+
+
+
+### Trees
+
+#### Together
+
+Hierarchical clustering reveals 3 major branches: characteristic of Subject A, characteristic of Subject B, and Shared Outlier State. 
+```{r david-merged-tree,fig.width=7,fig.height=20}
+dm <- dcast(david.div, sample.i ~ sample.j, value.var = "distance")
+rn <- dm$sample.i
+dm <- dm[, -1]
+dm <- as.matrix(dm)
+rownames(dm) <- rn
+dendro <- as.dendrogram(hclust(dist(dm)))
+unique.day.events[, day := as.character(day)]
+setkey(unique.day.events, subject, day)
+david.samples[, day := as.character(day)]
+david.samples[, state := {
+  subj <- subject
+  dd <- day
+  unique.day.events[.(subj, dd), event]
+}, by = .(subject, day)]
+setkey(david.samples, sample)
+dendro <- dendrapply(dendro, function(d) {
+  if (is.leaf(d)) {
+    samp <- attr(d, "label")
+    subj <- david.samples[samp, subject]
+    state <- david.samples[samp, state]
+    attr(d, "nodePar") <- append(attr(d, "nodePar"), list(subject = subj, 
+                                                          state = state))
+  }
+  d
+})
+ggraph(dendro, "dendrogram") +
+  geom_edge_elbow() +
+  geom_node_point(aes(filter = leaf, shape = subject, color = state), size = 1) +
+  theme_graph(base_family = "Helvetica") +
+  # theme(aspect.ratio = 1) + 
+  coord_flip()
+```
+
+#### Separate
+Clustering separately shows that Subject B has distinct pre- and post-Salmonella states, but the various events in Subject A's life didn't create alternate stable states that were significantly different.
+
+```{r david-event-trees,fig.height=9,fig.width=7}
+setkey(david.div, subject.i, subject.j)
+dendros <- lapply(david.subjects, function(subj) {
+  sd <- david.div[.(subj, subj)]
+  dm <- dcast(sd, sample.i ~ sample.j, value.var = "distance")
+  rn <- dm$sample.i
+  dm <- dm[, -1]
+  dm <- as.matrix(dm)
+  rownames(dm) <- rn
+  hc <- hclust(dist(dm))
+  dendro <- as.dendrogram(hc)
+  return(dendro)
+}
+)
+unique.day.events[, day := as.character(day)]
+# setkey(events, subject)
+setkey(unique.day.events, subject, day)
+setkey(david.samples, sample)
+dendros <- lapply(david.subjects, function(subj) {
+  dendro <- dendros[[subj]]
+  dendro <- dendrapply(dendro, function(d) {
+    if (is.leaf(d)) {
+      dday <- david.samples[attr(d, "label"), as.character(day)]
+      ev <- unique.day.events[.(subj, dday), event]
+      attr(d, "nodePar") <- append(attr(d, "nodePar"), list(
+        day = as.numeric(dday),
+        event = ev))
+    }
+    d
+  })
+  # propagate metadata back up the tree
+  dendro <- tree_apply(dendro, function(node, children, depth, tree) {
+  if (!is.leaf(node)) {
+    events <- sapply(children, function(c) {
+      attr(c, "nodePar")$event
+    })
+    events <- unique(events)
+    if (length(events) == 1 & !anyNA(events)) {
+      attr(node, "nodePar") <- append(attr(node, "nodePar"), list(event = events))
+    } else {
+      attr(node, "nodePar") <- append(attr(node, "nodePar"), list(event = NA))
+    }
+  }
+  node
+  }, direction = "up")
+  dendro
+})
+dendro.plots <- lapply(dendros, function(dend) {
+  ggraph(dend, "dendrogram", circular = TRUE) +
+    geom_edge_elbow(aes(color = node2.event)) +
+    geom_node_point(aes(filter = leaf, color = day), size = 0.6) +
+    scale_color_distiller(palette = "Spectral") +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1)
+})
+plot_grid(plotlist = dendro.plots, nrow = 2, labels = "AUTO")
+```
+
+Subject A doesn't seem to have a distinct "traveling" composition.
+Indeed it seems the distance between traveling and US compositions doesn't seem noticeably larger than the distance between US compositions.
+Meaning traveling did not destabilize the microbiome any more than baseline fluctuations while living in the US.
+Perhaps this is due to many OTUs remaining stable through the duration of travel.
+
+Subject B shows clear pre- and post-Salmonella states, as reported in the original manuscript.
+Perhaps the post-Salmonella state is separate because of the extinction of cluster 4 (see original paper) during infection, rendering return to the pre-Salmonella state impossible?
