@@ -64,7 +64,7 @@ This shows that not all ecotypes at all depths are most strongly driven by annua
 E.g. e9312 apparently experiences strong annual cycling at all depths except 100.
 NATL experiences annual cycling at all depths but it is relatively weaker at depths 160-200.
 
-## State clustering with JSD
+### State clustering with JSD
 ```{r bats-states}
 setkey(bats, month)
 # all pairs
@@ -238,7 +238,7 @@ plot_grid(plotlist = bats.dendrographs, labels = names(bats.dendrographs),
           ncol = 3)
 ```
 
-## Coarse-graining states
+### Coarse-graining states
 Let the depth = 1 node ID be the state label of each time point.
 Again, this method doesn't seem to give much extra information for this dataset.
 Perhaps there's some other way to do this.
@@ -309,6 +309,113 @@ ggplot(bats.samps2states, aes(x = cal.month, y = state,
   facet_wrap(~ depth, scales = "free_y", ncol = 2)
 ```
 
+## HOT
+```{r hots-ts,fig.asp=1}
+hot[, rel.abund := abundance / sum(abundance), by = depth]
+hot[, log.rel.abund := log10(rel.abund)]
+ggplot(hot, aes(x = month, y = log.rel.abund)) +
+  geom_path(aes(group = ecotype)) +
+  facet_grid(depth ~ ecotype) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+```{r}
+setkey(hot, month)
+# all pairs
+hot[, id := paste(month, depth, sep = "_")]
+hot.ids <- unique(hot$id)
+hot.div <- MakeNonRedundantPairs(hot.ids, prefix = "id")
+hot.div[, c("month.i", "depth.i") := tstrsplit(id.i, "_")]
+hot.div[, c("month.j", "depth.j") := tstrsplit(id.j, "_")]
+# it would be nice to get distances between depths but we'll do same depth rn
+# down by order of magnitude
+hot.div <- hot.div[depth.i == depth.j & month.j >= month.i]
+hot.div[, depth.j := NULL]
+setnames(hot.div, "depth.i", "depth")
+setkey(hot, id)
+hot.div[, jsd := {
+  if (id.i == id.j) {
+    0
+  } else {
+    sd <- hot[c(id.i, id.j)]
+    sd <- dcast(sd, ecotype ~ id, value.var = "rel.abund", 
+                fun.aggregate = mean)
+    sd <- as.matrix(sd[, -1])
+    genJSD(sd)
+  }
+  }, by = .(id.i, id.j)]
+rec <- hot.div[id.i != id.j]
+setnames(rec, names(rec), sapply(names(rec), function(str) {
+  if (grepl("\\.i", str)) sub("\\.i", "\\.j", str)
+  else if (grepl("\\.j", str)) sub("\\.j", "\\.i", str)
+  else str
+}))
+hot.div <- rbind(hot.div, rec)
+hot.div[, distance := sqrt(jsd)]
+hot.div[, ":=" (month.i = as.numeric(month.i), 
+                 month.j = as.numeric(month.j))]
+hot.div[, delta := month.j - month.i]
+```
+```{r}
+hot.div[, depth := factor(depth, levels = as.character(
+  sort(as.numeric(unique(depth)))
+))]
+ggplot(hot.div, aes(x = distance)) +
+  stat_ecdf(aes(color = depth))
+hot.div[, depth := as.numeric(as.character(depth))]
+```
+
+```{r}
+vertices <- unique(hot[, .(id, month, cal.month, depth)])
+edges <- hot.div[delta == 1, .(id.i, id.j, depth = as.numeric(depth))]
+graph <- graph_from_data_frame(edges, directed = FALSE, vertices)
+hot.depths <- unique(hot$depth)
+hot.depths <- hot.depths[order(as.numeric(hot.depths))]
+names(hot.depths) <- hot.depths
+hot.dms <- lapply(hot.depths, function(de) {
+  d <- hot.div[depth == de]
+  MakeDistMatrix(d, "id.i", "id.j")
+})
+fits <- lapply(hot.dms, function(dm) {
+  CoordCMDS(dm)
+})
+xforms <- lapply(fits, function(x) {
+  x$points
+}) %>% rbindlist(use.names = TRUE, idcol = "depth")
+hot.eigranks <- lapply(fits, function(x) {
+  x$eigrank
+}) %>% rbindlist(use.names = TRUE, idcol = "depth")
+hot.eigranks[, depth := factor(depth, levels = hot.depths)]
+```
+```{r}
+ggplot(hot.eigranks, aes(x = rank, y = value)) +
+  geom_point(aes(color = depth)) +
+  scale_x_log10()
+```
+
+```{r hot-path-plots,fig.asp=1.2}
+setkey(xforms, sample)
+lo <- create_layout(graph, "manual", node.positions = xforms[V(graph)$name])
+mbreaks <- c(1, 3, 6, 9, 12) # Jan, plus months of solstices + equinoxes
+ggraph(lo) +
+  geom_edge_link(arrow = arrow(type = "closed", length = unit(3, "points")),
+                 end_cap = square(length = 3, unit = "points"),
+                 edge_width = 0.2) +
+  geom_node_point(aes(color = cal.month), size = 0.5) +
+  scale_color_gradientn(values = scales::rescale(mbreaks),
+                        colors = c("blue", "green4", "yellow", "orange",
+                                   "blue")
+                        ) +
+  facet_wrap(~ depth, ncol = 3) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+```
+```{r, fig.asp=1.5}
+hot.div[, depth := as.numeric(as.character(depth))]
+ggplot(hot.div, aes(x = month.i, y = month.j)) +
+  geom_tile(aes(fill = jsd)) + 
+  facet_wrap(~ depth, ncol = 3) + 
+  theme(aspect.ratio = 1)
+```
 
 # Nahant
 
