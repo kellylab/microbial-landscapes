@@ -176,139 +176,6 @@ ggplot(bats.div[delta > 0], aes(x = delta, y = jsd)) +
   geom_smooth() +
   facet_wrap(~ depth, ncol = 3) 
 ```
-
-### Dendrogram
-
-For this dataset, the path plots might actually make the point more clearly/convincingly than the dendrogram wheels.
-
-```{r bats-dendro-plots, fig.width=7,fig.height=10}
-# clustering
-bats.info[, month := as.character(month)]
-setkey(bats.info, month)
-bats.dendros <- lapply(bats.dms, function(dm) {
-  hc <- hclust(dist(dm))
-  dendro <- as.dendrogram(hc)
-  dendro <- dendrapply(dendro, function(d) {
-    if (is.leaf(d)) {
-      labl <- attr(d, "label")
-      mo <- strsplit(labl, "_")[[1]][1]
-      cal.month <- unique(bats.info[mo, cal.month]) # for multiple passes/mo
-      year <- unique(bats.info[mo, year]) # for multiple passes/mo
-      attr(d, "nodePar") <- list(month = as.numeric(mo),
-                                 cal.month = cal.month,
-                                 year = year
-      )
-    }
-    d
-  })
-  dendro <- tree_apply(dendro, function(node, children, depth, tree) {
-    if(!is.leaf(node)) {
-      child.months <- sapply(children, function(n) {
-        attr(n, "nodePar")$cal.month
-      })
-      cal.month <- mean(child.months)
-      attr(node, "nodePar") <- append(attr(node, "nodePar"),
-                                      list(cal.month = cal.month))
-    }
-    node
-  }, direction = "up")
-  dendro
-})
-bats.los <- lapply(bats.dendros, function(dendro) {
-  create_layout(dendro, "dendrogram", circular = TRUE)
-})
-bats.dendrographs <- lapply(bats.los, function(layout) {
-  ggraph(layout) +
-    geom_edge_elbow() +
-    # geom_edge_elbow(aes(color = node2.cal.month)) +
-    # scale_edge_color_gradientn(values = scales::rescale(mbreaks),
-    #                       colors = c("blue", "green4", "yellow", "orange",
-    #                                  "blue")) +
-    theme_graph(base_family = "Helvetica") +
-    geom_node_point(aes(filter = leaf, color = cal.month, 
-                        shape = as.character(year)),
-                    size = 1) +
-    scale_color_gradientn(values = scales::rescale(mbreaks),
-                          colors = c("blue", "green4", "yellow", "orange",
-                                     "blue")) +
-    theme_graph(base_family = "Helvetica") +
-    theme(aspect.ratio = 1, legend.position = "none")
-})
-plot_grid(plotlist = bats.dendrographs, labels = names(bats.dendrographs),
-          ncol = 3)
-```
-
-### Coarse-graining states
-Let the depth = 1 node ID be the state label of each time point.
-Again, this method doesn't seem to give much extra information for this dataset.
-Perhaps there's some other way to do this.
-```{r bats-states-coarsegrain}
-# create a unique ID for each state at depth = 2 and propagate down 
-bats.dendros <- lapply(bats.dendros, function(dendro, thresh = 2) {
-  # propagate up
-  dendro <- tree_apply(dendro, function(node, children, depth, tree, th = thresh) {
-    if (is.leaf(node)) {
-      mo <- strsplit("_", attr(node, "label"))[[1]][[1]]
-      state <- attr(node, "label")
-    } else {
-      if (depth >= th) {
-        child.states <- sapply(children, function(d) attr(d, "nodePar")$state)
-        # take the first child state as branch state
-        state <- child.states[[1]]
-      } else {
-        state <- NA
-      }
-    }
-    if (is.null (state)) browser()
-    attr(node, "nodePar") <- append(attr(node, "nodePar"), list(state = state))
-    node
-  }, direction = "up")
-  # propagate down
-  dendro <- tree_apply(dendro, function(node, parent, depth, tree, th = thresh) {
-    if (depth > th) {
-      parstate <- attr(parent, "nodePar")$state
-      attr(node, "nodePar")$state <- parstate
-    }
-    node
-  })
-  dendro
-})
-```
-```{r bats-states-coarsegrain-probability,fig.width=7,fig.height=9}
-pl.bats.states <- lapply(bats.dendros, function(dendro) {
-  ggraph(dendro, "dendrogram", circular = TRUE) +
-  geom_edge_elbow(aes(color = node2.state)) +
-  geom_node_point(aes(filter = leaf, 
-                      color = cal.month),
-                  size = 1
-                  )+
-  theme_graph(base_family = "Helvetica") +
-  theme(aspect.ratio = 1, legend.position = "none") + 
-  scale_color_gradientn(values = scales::rescale(mbreaks),
-                        colors = c("blue", "green4", "yellow", "orange",
-                                   "blue")) +
-  guides(shape = guide_legend(ncol = 2),
-         edge_colour = guide_legend(ncol = 2))
-})
-plot_grid(plotlist = pl.bats.states, ncol = 3, labels = names(pl.bats.states))
-bats.samps2states <- lapply(bats.dendros, function(dendro) {
-  graf <- den_to_igraph(dendro)
-  islf <- V(graf)$leaf
-  yr <- V(graf)$year[islf]
-  mo <- V(graf)$month[islf]
-  cm <- V(graf)$cal.month[islf]
-  st <- V(graf)$state[islf]
-  data.table(month = mo, year = yr, cal.month = cm, state = st)
-}) %>% rbindlist(idcol = "depth")
-ggplot(bats.samps2states, aes(x = cal.month, y = state, 
-                              color = as.character(year))) +
-  geom_line(aes(group = year)) +
-  # geom_jitter(width = 0, height = 0.3) +
-  labs(color = "year") +
-  # theme(legend.position = "bottom") +
-  facet_wrap(~ depth, scales = "free_y", ncol = 2)
-```
-
 ## HOT
 ```{r hots-ts,fig.asp=1}
 hot[, rel.abund := abundance / sum(abundance), by = depth]
@@ -355,13 +222,21 @@ hot.div[, ":=" (month.i = as.numeric(month.i),
                  month.j = as.numeric(month.j))]
 hot.div[, delta := month.j - month.i]
 ```
+
+Shallower depths are more stable in composition:
 ```{r}
-hot.div[, depth := factor(depth, levels = as.character(
-  sort(as.numeric(unique(depth)))
-))]
 ggplot(hot.div, aes(x = distance)) +
-  stat_ecdf(aes(color = depth))
-hot.div[, depth := as.numeric(as.character(depth))]
+  stat_ecdf(aes(color = factor(depth,
+                               levels = as.character(
+                                 sort(
+                                   unique(
+                                     as.numeric(depth)
+                                     )
+                                   )
+                                 )
+                               )
+  )) +
+  labs(color = "depth")
 ```
 
 ```{r}
@@ -384,12 +259,9 @@ xforms <- lapply(fits, function(x) {
 hot.eigranks <- lapply(fits, function(x) {
   x$eigrank
 }) %>% rbindlist(use.names = TRUE, idcol = "depth")
-hot.eigranks[, depth := factor(depth, levels = hot.depths)]
-```
-```{r}
-ggplot(hot.eigranks, aes(x = rank, y = value)) +
-  geom_point(aes(color = depth)) +
-  scale_x_log10()
+ggplot(hot.eigranks, aes(x = rank, y = value ^ 2)) +
+  geom_point() +
+  facet_wrap(~ as.numeric(depth), scales = "free_y")
 ```
 
 ```{r hot-path-plots,fig.asp=1.2}
