@@ -128,38 +128,6 @@ eigranks <- lapply(fits, function(x) {
 eigranks[, depth := factor(depth, levels = bats.depths)]
 ```
 
-### Distances represented as path plots
-```{r bats-path-plots,fig.width=7,fig.height=9}
-setkey(xforms, sample)
-lo <- create_layout(graph, "manual", node.positions = xforms[V(graph)$name])
-mbreaks <- c(1, 3, 6, 9, 12) # Jan, plus months of solstices + equinoxes
-ggraph(lo) +
-  geom_edge_link(arrow = arrow(type = "closed", length = unit(3, "points")),
-                 end_cap = square(length = 3, unit = "points"),
-                 edge_width = 0.2) +
-  geom_node_point(aes(color = cal.month), size = 0.5) +
-  scale_color_gradientn(values = scales::rescale(mbreaks),
-                        colors = c("blue", "green4", "yellow", "orange",
-                                   "blue")
-                        ) +
-  facet_wrap(~ depth, ncol = 3) +
-  theme_graph(base_family = "Helvetica") +
-  theme(aspect.ratio = 1)
-```
-
-This also shows that seasonal cycling is more reproducible at some depths.
-For depths shallower than 100, there seems to be a reproducible path, and the composition seems to change more gradually, as can be seen in the close spacing of most consecutive timepoints.
-For depths 120-160, there are also reproducible paths, however, there are 3 clusters of time points (seemingly representing spring, summer/early fall, and late fall/winter) with large gaps between them, and the long leaps between clusters suggests the seasonal compositional transitions are more drastic.
-Finally, depths 180-200 appear more random.
-
-Eigenvalues of MDS show that this transformation captures most of the information:
-```{r,bats-jsd-eig}
-ggplot(eigranks, aes(x = rank, y = value ^2)) +
-  geom_point() +
-  scale_x_log10() +
-  facet_wrap(~ depth, scales = "free_y")
-```
-
 ### Compositional autocorrelation
 Heatmapping the JSDs shows occupancy of stable states as dark squares of high temporal similarity along the diagonal.
 Recurrence of stable states show as dark off-diagonal rectangles.
@@ -225,54 +193,6 @@ hot.div[, ":=" (month.i = as.numeric(month.i),
 hot.div[, delta := month.j - month.i]
 ```
 
-```{r}
-vertices <- unique(hot[, .(id, month, cal.month, depth)])
-edges <- hot.div[delta == 1, .(id.i, id.j, depth = as.numeric(depth))]
-graph <- graph_from_data_frame(edges, directed = FALSE, vertices)
-hot.depths <- unique(hot$depth)
-hot.depths <- hot.depths[order(as.numeric(hot.depths))]
-names(hot.depths) <- hot.depths
-hot.dms <- lapply(hot.depths, function(de) {
-  d <- hot.div[depth == de]
-  MakeDistMatrix(d, "id.i", "id.j")
-})
-fits <- lapply(hot.dms, function(dm) {
-  CoordCMDS(dm)
-})
-xforms <- lapply(fits, function(x) {
-  x$points
-}) %>% rbindlist(use.names = TRUE, idcol = "depth")
-hot.eigranks <- lapply(fits, function(x) {
-  x$eigrank
-}) %>% rbindlist(use.names = TRUE, idcol = "depth")
-ggplot(hot.eigranks, aes(x = rank, y = value ^ 2)) +
-  geom_point() +
-  facet_wrap(~ as.numeric(depth), scales = "free_y")
-```
-
-### Distances represented as path plots
-
-The shallower depths appear more tightly clustered.
-This probably doesn't reflect so much greater stability, since each depth is projected independently, but rather the fact that the variance in pairwise distances is smaller at the shallower depths (i.e. shallow depths have small distances, whereas deep depths have small and large distances).
-We could normalize the distances per depth to better see the structure of the shallow paths, but maybe we want to keep it like this.
-```{r hot-path-plots,fig.asp=1.2}
-setkey(xforms, sample)
-lo <- create_layout(graph, "manual", node.positions = xforms[V(graph)$name])
-mbreaks <- c(1, 3, 6, 9, 12) # Jan, plus months of solstices + equinoxes
-ggraph(lo) +
-  geom_edge_link(arrow = arrow(type = "closed", length = unit(3, "points")),
-                 end_cap = square(length = 3, unit = "points"),
-                 edge_width = 0.2) +
-  geom_node_point(aes(color = cal.month), size = 0.5) +
-  scale_color_gradientn(values = scales::rescale(mbreaks),
-                        colors = c("blue", "green4", "yellow", "orange",
-                                   "blue")
-                        ) +
-  facet_wrap(~ depth, ncol = 3) +
-  theme_graph(base_family = "Helvetica") +
-  theme(aspect.ratio = 1)
-```
-
 ### Compositional autocorrelation
 
 Heatmaps don't reveal clear periodic patterns.
@@ -284,15 +204,6 @@ ggplot(hot.div, aes(x = month.i, y = month.j)) +
   facet_wrap(~ depth, ncol = 3) + 
   theme(aspect.ratio = 1) +
   labs(x = "month", y = "month", fill = "JSD")
-```
-
-Autocorrelation plots support predominantly aperiodic behavior.
-```{r hot-autocorr,fig.asp=1}
-ggplot(hot.div[delta > 0], aes(x = delta, y = jsd)) +
-  geom_point(size = 0.2) +
-  geom_smooth() +
-  facet_wrap(~ depth, ncol = 3, scales = "free_y") +
-  labs(x = "lag(months)", y = "JSD")
 ```
 
 # Comparison
@@ -315,20 +226,138 @@ ggsave("bats_hot_distance_ecdf.pdf")
 ```
 
 ## 'Autocorrelation' (Time-lag JSD)
-```{r,fig.asp=1.2}
+
+Select depths only:
+```{r}
 bats.sel <- c( 1, 20, 40, 100, 140, 160)
 hot.sel <- c(5, 25, 45, 100,  125, 175)
-p1 <- ggplot(bats.div[depth %in% bats.sel & delta > 0], aes(x = delta, y = jsd)) +
+```
+
+### Heatmaps
+
+```{r,fig.asp=1.4}
+heatmaps <- mapply(function(div, s) {
+  div[, depth := as.numeric(as.character(depth))]
+  ggplot(div, aes(x = month.i, y = month.j)) +
+    geom_tile(aes(fill = jsd)) + 
+    facet_wrap(~ depth, nrow = 2) + 
+    scale_fill_distiller(palette = "Greys") +
+    theme(aspect.ratio = 1#, 
+          # legend.position = "bottom", 
+          # legend.text = element_text(angle = 90, vjust = 0.5, hjust = 1)
+          ) +
+    labs(x = "month", y = "month", fill = "JSD", title = s)
+}, div = list(bats.div[depth %in% bats.sel], 
+              hot.div[depth %in% hot.sel]), 
+s = c("BATS", "HOT"), SIMPLIFY = FALSE
+)
+plot_grid(plotlist = heatmaps, nrow = 2, align = "hv")
+ggsave("bats_hot_selectdepths_jsd_heatmap.pdf")
+```
+
+### 'Correlograms'
+```{r,fig.asp=1.2}
+p1 <- ggplot(bats.div[delta > 0], aes(x = delta, y = jsd)) +
   geom_point(size = 0.2, color = "grey") +
   geom_smooth(fill = "blue") +
   facet_wrap(~ depth, ncol = 1, scales = "free_y") +
   labs(x = "lag(months)", y = "JSD", title = "BATS")
-p2 <- ggplot(hot.div[depth %in% hot.sel & delta > 0], aes(x = delta, y = jsd)) +
+p2 <- ggplot(hot.div[delta > 0], aes(x = delta, y = jsd)) +
   geom_point(size = 0.2, color = "grey") +
   geom_smooth(fill = "blue") +
   facet_wrap(~ depth, ncol = 1, scales = "free_y") +
   labs(x = "lag(months)", y = "JSD", title = "HOT")
 plot_grid(p1, p2, ncol = 2, align = "hv")
 ggsave("bats_hot_timelag_jsd.pdf")
+```
+
+* BATS: strongly periodic at most depths
+
+* HOT: mostly aperiodic
+
+## Path plots
+```{r}
+pldata <- lapply(list(bats = list(dt = bats, div = bats.div, sel = bats.sel), 
+                      hot = list(dt = hot, div = hot.div, sel = hot.sel)), 
+                 function(ll) {
+  sel <- ll$sel
+  dt <- ll$dt[depth %in% sel]
+  div.dt <- ll$div[depth %in% sel]
+  # make sure depth is numeric
+  vertices <- unique(dt[, .(id, month, cal.month, depth)]) 
+  edges <- div.dt[delta == 1, .(id.i, id.j, depth = as.numeric(depth))]
+  graph <- graph_from_data_frame(edges, directed = FALSE, vertices)
+  depth <- unique(vertices$depth)
+  names(depth) <- depth
+  dms <- lapply(depth, function(de) {
+    d <- div.dt[depth == de]
+    MakeDistMatrix(d, "id.i", "id.j")
+  })
+  fits <- lapply(dms, function(dm) {
+    fit <- CoordCMDS(dm)
+  })
+  xforms <- lapply(fits, function(fit) {
+    fit$points
+  }) %>% rbindlist(use.names = TRUE, idcol = "depth")
+  eigranks <- lapply(fits, function(x) {
+    x$eigrank
+  }) %>% rbindlist(use.names = TRUE, idcol = "depth")
+  list(graph = graph, xforms = xforms, eigranks = eigranks)
+})
+mb <- c(1, 3, 6, 9, 12) # Jan, plus months of solstices + equinoxes
+pls <- lapply(pldata, function(data, mbreaks = mb) {
+  setkey(data$xforms, sample)
+  lo <- create_layout(data$graph, "manual", 
+                      node.positions = data$xforms[V(data$graph)$name])
+  ggraph(lo) +
+    geom_edge_link(arrow = arrow(type = "closed", length = unit(3, "points")),
+                   end_cap = square(length = 3, unit = "points"),
+                   edge_width = 0.2) +
+    geom_node_point(aes(color = cal.month), size = 0.5) +
+    scale_color_gradientn(values = scales::rescale(mbreaks),
+                          colors = c("blue", "green4", "yellow", "orange",
+                                     "blue")
+                          ) +
+    facet_wrap(~ depth, ncol = 3) +
+    labs(color = "calendar\nmonth") +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1)
+})
+pls <- mapply(function(x, y) {
+  x + labs(title = toupper(y))
+  },
+  pls, names(pldata),
+  SIMPLIFY = FALSE)
+```
+```{r,fig.asp=1.4}
+plot_grid(plotlist = pls, ncol = 1, align = "v")
+ggsave("bats_hot_selectdepths_paths.pdf")
+```
+
+### BATS
+Seasonal cycling is more reproducible at some depths.
+For depths shallower than 100, there seems to be a reproducible path, and the composition seems to change more gradually, as can be seen in the close spacing of most consecutive timepoints.
+For depths 120-160, there are also reproducible paths, however, there are 3 clusters of time points (seemingly representing spring, summer/early fall, and late fall/winter) with large gaps between them, and the long leaps between clusters suggests the seasonal compositional transitions are more drastic.
+Finally, depths 180-200 appear more random.
+
+### HOT
+The shallower depths appear more tightly clustered.
+This probably doesn't reflect so much greater stability, since each depth is projected independently, but rather the fact that the variance in pairwise distances is smaller at the shallower depths (i.e. shallow depths have small distances, whereas deep depths have small and large distances).
+We could normalize the distances per depth to better see the structure of the shallow paths, but maybe we want to keep it like this.
+
+### Eigenvalues of MDS
+```{r}
+# eigranks <- lapply(pldata, function(d) d$eigranks) %>%
+#   rbindlist(idcol = "dataset")
+plot_grid(plotlist = mapply(function(d, s) {
+  eigranks <- d$eigranks
+  eigranks[, depth := as.numeric(depth)]
+  ggplot(eigranks, aes(x = rank, y = value)) +
+    geom_point() +
+    scale_x_log10() +
+    labs(title = s) +
+    facet_wrap(~ depth, nrow = 1, scales = "free_y")
+}, d = pldata, s = toupper(names(pldata)), SIMPLIFY = FALSE
+), nrow = 2)
 ```
 
