@@ -315,18 +315,20 @@ ggsave("bats_hot_distance_ecdf.pdf")
 ```
 
 ## 'Autocorrelation' (Time-lag JSD)
-```{r,fig.asp=1.5}
-p1 <- ggplot(bats.div[delta > 0], aes(x = delta, y = jsd)) +
+```{r,fig.asp=1.2}
+bats.sel <- c( 1, 20, 40, 100, 140, 160)
+hot.sel <- c(5, 25, 45, 100,  125, 175)
+p1 <- ggplot(bats.div[depth %in% bats.sel & delta > 0], aes(x = delta, y = jsd)) +
   geom_point(size = 0.2, color = "grey") +
   geom_smooth(fill = "blue") +
-  facet_wrap(~ depth, nrow = 3, scales = "free_y") +
+  facet_wrap(~ depth, ncol = 1, scales = "free_y") +
   labs(x = "lag(months)", y = "JSD", title = "BATS")
-p2 <- ggplot(hot.div[delta > 0], aes(x = delta, y = jsd)) +
+p2 <- ggplot(hot.div[depth %in% hot.sel & delta > 0], aes(x = delta, y = jsd)) +
   geom_point(size = 0.2, color = "grey") +
   geom_smooth(fill = "blue") +
-  facet_wrap(~ depth, nrow = 3, scales = "free_y") +
+  facet_wrap(~ depth, ncol = 1, scales = "free_y") +
   labs(x = "lag(months)", y = "JSD", title = "HOT")
-plot_grid(p1, p2, nrow = 2, align = "v")
+plot_grid(p1, p2, ncol = 2, align = "hv")
 ggsave("bats_hot_timelag_jsd.pdf")
 ```
 
