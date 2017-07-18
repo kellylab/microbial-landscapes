@@ -1,11 +1,11 @@
 ---
 title: "Decomposition of time scales in *Prochlorococcus* time series"
 output:
+  html_notebook: default
   html_document:
     toc: yes
     toc_depth: 2
     toc_float: yes
-  html_notebook: default
   pdf_document: default
 ---
 
@@ -105,15 +105,6 @@ bats.div[, ":=" (month.i = as.numeric(month.i),
 bats.div[, delta := month.j - month.i]
 ```
 
-All depths have about the same compositional variability.
-```{r}
-ggplot(bats.div, aes(x = distance)) +
-  stat_ecdf(aes(color = factor(as.character(depth),
-                                  levels = as.character(sort(unique(depth))))
-  )) +
-  labs(color = "depth")
-```
-
 ```{r bats-jsd-mds}
 vertices <- unique(bats[, .(id, month, cal.month, depth)])
 edges <- bats.div[delta == 1, .(id.i, id.j, depth = as.numeric(depth))]
@@ -183,15 +174,6 @@ ggplot(bats.div, aes(x = month.i, y = month.j)) +
   labs(x = "month", y = "month", fill = "JSD")
 ```
 
-David-style, JSD-based 'autocorrelation.'
-The periodicity of many of the autocorrelation functions shows strong periodic dynamics at a single time scale.
-```{r bats-autocorr,fig.asp=1}
-ggplot(bats.div[delta > 0], aes(x = delta, y = jsd)) +
-  geom_point(size = 0.2) +
-  geom_smooth() +
-  facet_wrap(~ depth, ncol = 3, scales = "free_y") +
-  labs(x = "lag(months)", y = "JSD")
-```
 # HOT
 
 ## Relative abundance time series
@@ -241,23 +223,6 @@ hot.div[, distance := sqrt(jsd)]
 hot.div[, ":=" (month.i = as.numeric(month.i), 
                  month.j = as.numeric(month.j))]
 hot.div[, delta := month.j - month.i]
-```
-
-Shallower depths are much more stable in composition.
-This is notably different from BATS.
-```{r}
-ggplot(hot.div, aes(x = distance)) +
-  stat_ecdf(aes(color = factor(depth,
-                               levels = as.character(
-                                 sort(
-                                   unique(
-                                     as.numeric(depth)
-                                     )
-                                   )
-                                 )
-                               )
-  )) +
-  labs(color = "depth", y = "ECDF")
 ```
 
 ```{r}
@@ -329,3 +294,39 @@ ggplot(hot.div[delta > 0], aes(x = delta, y = jsd)) +
   facet_wrap(~ depth, ncol = 3, scales = "free_y") +
   labs(x = "lag(months)", y = "JSD")
 ```
+
+# Comparison
+
+## Distance distributions
+```{r,fig.asp=1}
+p1 <- ggplot(bats.div, aes(x = distance)) +
+  stat_ecdf(aes(color = factor(as.character(depth),
+                                  levels = as.character(sort(unique(depth))))
+  )) +
+  labs(color = "depth", y = "ECDF", title = "BATS")
+p2 <- ggplot(hot.div, aes(x = distance)) +
+  stat_ecdf(aes(color = factor(depth, levels = as.character(sort(unique(
+                                     as.numeric(depth)
+                                     )))))
+            ) +
+  labs(color = "depth", y = "ECDF", title = "HOT")
+plot_grid(p1, p2, nrow = 2, align = "v")
+ggsave("bats_hot_distance_ecdf.pdf")
+```
+
+## 'Autocorrelation' (Time-lag JSD)
+```{r,fig.asp=1.5}
+p1 <- ggplot(bats.div[delta > 0], aes(x = delta, y = jsd)) +
+  geom_point(size = 0.2, color = "grey") +
+  geom_smooth(fill = "blue") +
+  facet_wrap(~ depth, nrow = 3, scales = "free_y") +
+  labs(x = "lag(months)", y = "JSD", title = "BATS")
+p2 <- ggplot(hot.div[delta > 0], aes(x = delta, y = jsd)) +
+  geom_point(size = 0.2, color = "grey") +
+  geom_smooth(fill = "blue") +
+  facet_wrap(~ depth, nrow = 3, scales = "free_y") +
+  labs(x = "lag(months)", y = "JSD", title = "HOT")
+plot_grid(p1, p2, nrow = 2, align = "v")
+ggsave("bats_hot_timelag_jsd.pdf")
+```
+
