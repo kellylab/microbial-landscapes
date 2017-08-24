@@ -23,6 +23,12 @@ knitr::opts_chunk$set(
 )
 data.dir <- "../../data/"
 source("load_data.R")
+
+num2fac <- function(v, ...) {
+  uv <- unique(v)
+  factor(as.character(v),
+         levels = as.character(sort(uv), ...))
+}
 ```
 
 # BATS
@@ -210,18 +216,24 @@ ggplot(hot.div, aes(x = month.i, y = month.j)) +
 
 ## Distance distributions
 ```{r,fig.asp=1}
-p1 <- ggplot(bats.div, aes(x = distance)) +
-  stat_ecdf(aes(color = factor(as.character(depth),
-                                  levels = as.character(sort(unique(depth))))
-  )) +
-  labs(color = "depth", y = "ECDF", title = "BATS")
-p2 <- ggplot(hot.div, aes(x = distance)) +
-  stat_ecdf(aes(color = factor(depth, levels = as.character(sort(unique(
-                                     as.numeric(depth)
-                                     )))))
-            ) +
-  labs(color = "depth", y = "ECDF", title = "HOT")
-plot_grid(p1, p2, nrow = 2, align = "v")
+plist <- mapply(function(d, t) {
+  ggplot(d, aes(x = distance)) +
+    stat_density() +
+    facet_wrap(~ num2fac(depth), scales = "free_y") +
+    labs(fill = "depth", y = "density", title = t) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+}, d = list(bats.div, hot.div), t = c("BATS", "HOT"), SIMPLIFY = FALSE
+)
+plot_grid(plotlist = plist, nrow = 2, align = "v")
+```
+```{r,fig.asp=1}
+plist <- mapply(function(d, t) {
+  ggplot(d, aes(x = distance)) +
+    stat_ecdf(aes(color = num2fac(depth))) +
+    labs(color = "depth", y = "ECDF", title = t) 
+}, d = list(bats.div, hot.div), t = c("BATS", "HOT"), SIMPLIFY = FALSE
+)
+plot_grid(plotlist = plist, nrow = 2, align = "v")
 ggsave("bats_hot_distance_ecdf.pdf")
 ```
 
@@ -257,17 +269,14 @@ ggsave("bats_hot_selectdepths_jsd_heatmap.pdf")
 
 ### 'Correlograms'
 ```{r,fig.asp=1.2}
-p1 <- ggplot(bats.div[delta > 0], aes(x = delta, y = jsd)) +
-  geom_point(size = 0.2, color = "grey") +
-  geom_smooth(fill = "blue") +
-  facet_wrap(~ depth, ncol = 1, scales = "free_y") +
-  labs(x = "lag(months)", y = "JSD", title = "BATS")
-p2 <- ggplot(hot.div[delta > 0], aes(x = delta, y = jsd)) +
-  geom_point(size = 0.2, color = "grey") +
-  geom_smooth(fill = "blue") +
-  facet_wrap(~ depth, ncol = 1, scales = "free_y") +
-  labs(x = "lag(months)", y = "JSD", title = "HOT")
-plot_grid(p1, p2, ncol = 2, align = "hv")
+plist <- lapply(list(bats.div, hot.div), function(dt, label) {
+  ggplot(dt[delta > 0], aes(x = delta, y = jsd)) +
+    geom_point(size = 0.2, color = "grey") +
+    geom_smooth(fill = "blue") +
+    facet_wrap(~ depth, ncol = 2, scales = "free_y") +
+    labs(x = "lag(months)", y = "JSD", title = label)
+}, label = c("BATS", "HOT"))
+plot_grid(plotlist = plist, ncol = 2, align = "hv")
 ggsave("bats_hot_timelag_jsd.pdf")
 ```
 

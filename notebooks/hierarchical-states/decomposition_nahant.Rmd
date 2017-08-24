@@ -183,20 +183,17 @@ This is sort of an autocorrelation spectrum.
 There are no peaks in this 'spectrum' suggesting there are no characteristic
 time scales of periodic behavior.
 Since there is only one major state transition in these data, it could also be interpreted as the period of state transitions being longer than the observation time, when interpreted as periodic.
-```{r nahant-sim-interval, fig.width=7, fig.height=5}
+```{r nahant-sim-interval}
 br <- days[seq(1, length(days), by = 5)]
 ggplot(day.div, aes(x = day.i, y = day.j)) +
-  geom_tile(aes(fill = distance)) +
+  geom_tile(aes(fill = jsd)) +
   scale_x_discrete(breaks = br) +
   scale_y_discrete(breaks = br) +
   theme(aspect.ratio = 1,
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-tl <- day.div[day.delta > 0, .(mn.dist = mean(distance)), by = day.delta]
-p0 <- ggplot(day.div[day.delta > 0], aes(x = day.delta, y = distance)) 
-p1 <- p0 + geom_point(size = 1) + 
-  # stat_smooth(aes(linetype = "mean"))  +
-  geom_line(aes(y = mn.dist, linetype = "mean"), tl, color = "blue", size = 2) +
+ggplot(day.div[day.delta > 0], aes(x = day.delta, y = jsd)) + 
+  geom_point(size = 1) + 
+  stat_smooth(aes(linetype = "mean"))  +
+  # geom_line(aes(y = mn.dist, linetype = "mean"), tl, color = "blue", size = 2) +
   labs(linetype = "", x = "interval (days)")
-p2 <- p0 + stat_bin_2d(binwidth = c(1, 0.01)) + labs(x = "interval (days)")
-plot_grid(p1, p2, nrow = 2, align = "hv", labels = "AUTO")
 ```
