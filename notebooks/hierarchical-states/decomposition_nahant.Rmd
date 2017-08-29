@@ -4,18 +4,21 @@ output: html_notebook
 ---
 
 ```{r setup}
-library(dplyr)
+library(tidyverse)
 library(data.table)
 library(cowplot)
 library(ggraph)
 library(igraph)
 source("utils.R")
+source("~/github_bitbucket/wkc.r-utils/df_2_mat.R")
+
 knitr::opts_chunk$set(
   fig.path = "decomposition_nahant_figs/",
   fig.keep = "high",
   dev = c("pdf")
 )
 data.dir <- "../../data/"
+script.dir <- "../../scripts/r/"
 nahant.bac <- fread(paste0(data.dir, "BactNorm.txt"), header = TRUE)
 nahant.bac <- melt(nahant.bac, id.vars = c("OTU", "ConsensusLineage"), 
                    variable.name = "day")
@@ -197,3 +200,48 @@ ggplot(day.div[day.delta > 0], aes(x = day.delta, y = jsd)) +
   # geom_line(aes(y = mn.dist, linetype = "mean"), tl, color = "blue", size = 2) +
   labs(linetype = "", x = "interval (days)")
 ```
+
+## Modularization
+
+Try to find states as modules in the network of JSDs between timepoints.
+
+### Greedy algorithm (Louvain)
+
+Reference: [Blondel 2008](https://arxiv.org/abs/0803.0476).
+
+```{r}
+graf <- graph_from_data_frame(day.div[as.numeric(day.i) < as.numeric(day.j), 
+                                      .(day.i, day.j, weight = similarity)], 
+                              directed = FALSE, 
+                              vertices = unique(day.div[, day.i]))
+system.time(clust <- cluster_louvain(graf))
+modularity(clust)
+membership(clust)
+```
+
+```{r}
+clust.dt <- data.table(cluster = as.character(membership(clust)),
+                       day = names(membership(clust)))
+setkey(clust.dt, day)
+V(graph)$cluster <- clust.dt[V(graph)$name, cluster]
+layout <- create_layout(graph, "manual", node.positions = xform)
+ggraph(layout) +
+  geom_edge_link(arrow = arrow(type = "closed", 
+                               length = unit(5, "points")),
+                 edge_width = 0.2,
+                 end_cap = square(length = 5, unit = "points")
+                 ) +
+  geom_node_point(aes(color = cluster)) +
+  theme_graph(base_family = "Helvetica") 
+```
+
+### Time-lagged state correlation
+```{r}
+day.div <- merge(day.div, clust.dt, by.x = "day.i", by.y = "day")
+day.div <- merge(day.div, clust.dt, by.x = "day.j", by.y = "day",
+                 suffixes = c(".i", ".j"))
+day.div[, same := cluster.i == cluster.j]
+ggplot(day.div[day.delta > 0], aes(x = day.delta, y = 1* same)) +
+  geom_smooth()
+```
+

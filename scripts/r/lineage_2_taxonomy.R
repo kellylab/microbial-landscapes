@@ -8,8 +8,7 @@
 #'
 #' @examples
 lineage_2_taxonomy <- function(lineage) {
-  library(data.table)
-  llist <- tstrsplit(lineage, ";")
+  llist <- data.table::tstrsplit(lineage, ";")
   lapply(llist, function(v) {
     sapply(v, function(w) {
       out <- sub("[[:alpha:]]__", "", w)

@@ -332,14 +332,14 @@ pls <- lapply(pldata, function(data, mbreaks = mb) {
     theme_graph(base_family = "Helvetica") +
     theme(aspect.ratio = 1)
 })
-pls <- mapply(function(x, y) {
+```
+```{r,fig.asp=1.4}
+plot_grid(plotlist = mapply(function(x, y) {
   x + labs(title = toupper(y))
   },
   pls, names(pldata),
-  SIMPLIFY = FALSE)
-```
-```{r,fig.asp=1.4}
-plot_grid(plotlist = pls, ncol = 1, align = "v")
+  SIMPLIFY = FALSE),
+  ncol = 1, align = "v")
 ggsave("bats_hot_selectdepths_paths.pdf")
 ```
 
@@ -368,5 +368,10 @@ plot_grid(plotlist = mapply(function(d, s) {
     facet_wrap(~ depth, nrow = 1, scales = "free_y")
 }, d = pldata, s = toupper(names(pldata)), SIMPLIFY = FALSE
 ), nrow = 2)
+```
+
+## Modularization
+```{r}
+
 ```
 
