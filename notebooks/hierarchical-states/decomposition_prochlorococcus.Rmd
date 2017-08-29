@@ -372,6 +372,17 @@ plot_grid(plotlist = mapply(function(d, s) {
 
 ## Modularization
 ```{r}
-
+jsd_2_clusts <- function(i, j, weight) {
+  g <- graph_from_data_frame(data.frame(i, j, weight = weight),
+                             directed = FALSE,
+                             vertices = unique(i))
+  cl <- cluster_louvain(g)
+  mem <- membership(cl)
+  list(mem[i], mem[j])
+}
+bats.div[, c("cluster.i", "cluster.j") := jsd_2_clusts(id.i, id.j, 1 - jsd),
+         by = depth]
+hot.div[, c("cluster.i", "cluster.j") := jsd_2_clusts(id.i, id.j, 1 - jsd),
+         by = depth]
 ```
 
