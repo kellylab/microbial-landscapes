@@ -22,7 +22,7 @@ knitr::opts_chunk$set(
   dev = c("pdf", "png")
 )
 data.dir <- "../../data/"
-source("load_data.R")
+source("load_prochlorococcus_data.R")
 
 num2fac <- function(v, ...) {
   uv <- unique(v)
@@ -31,21 +31,50 @@ num2fac <- function(v, ...) {
 }
 ```
 
-# BATS
-
-## Relative abundance time series
-
-```{r bats-ts,fig.width=7,fig.height=7}
-bats[, rel.abund := abundance / sum(abundance), by = depth]
-bats[, log.rel.abund := log10(rel.abund)]
-ggplot(bats, aes(x = month, y = log.rel.abund)) +
-  geom_path(aes(group = ecotype)) +
-  facet_grid(depth ~ ecotype) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+Average over multiple time points in a single month:
+```{r}
+ts <- prochlorococcus[, .(abundance = mean(abundance)), by = .(site,
+                                                               depth,
+                                                               ecotype,
+                                                               month,
+                                                               year,
+                                                               cal.month)
+                      ]
 ```
 
+## Relative abundance time series
+```{r}
+ts[, rel.abund := abundance / sum(abundance),
+   by = .(site, depth, month)]
+ts[, log.rel.abund := log10(rel.abund)]
+ggplot(ts, aes(x = month, y = log.rel.abund)) +
+  geom_path(aes(group = depth, color = depth)) +
+  facet_grid(ecotype ~ site, scales = "free_y") +
+  labs(y = "log relative abundance")
+```
 
 ## Spectral analysis
+```{r}
+ts <- dcast(ts, site + depth + month ~ ecotype, value.var = "rel.abund")
+```
+```{r}
+library(imputeTS)
+spectra <- ts[, {
+  m <- as.matrix(.SD) # TODO get rid of month col
+  m <- m[order(month),]
+  m[is.nan(m)] <- NA
+  m <- as.ts(m)
+  m <- na.interpolation(m)
+  sp <- stats::spectrum(m, plot = FALSE)
+  ll <- lapply(seq_len(ncol(sp$spec)), function(i) sp$spec[, i])
+  names(ll) <- sp$snames
+  ll$freq <- sp$freq
+  ll
+  }, 
+  by = .(site, depth)]
+spectra <- dcast(spectra, id.vars = c("site", "depth", "freq"))
+```
+
 ```{r bats-spec, fig.asp=1}
 # spectral analysis per ecotype per depth
 # mean per month if more than one sample
@@ -226,16 +255,6 @@ plist <- mapply(function(d, t) {
 )
 plot_grid(plotlist = plist, nrow = 2, align = "v")
 ```
-```{r,fig.asp=1}
-plist <- mapply(function(d, t) {
-  ggplot(d, aes(x = distance)) +
-    stat_ecdf(aes(color = num2fac(depth))) +
-    labs(color = "depth", y = "ECDF", title = t) 
-}, d = list(bats.div, hot.div), t = c("BATS", "HOT"), SIMPLIFY = FALSE
-)
-plot_grid(plotlist = plist, nrow = 2, align = "v")
-ggsave("bats_hot_distance_ecdf.pdf")
-```
 
 ## 'Autocorrelation' (Time-lag JSD)
 
@@ -247,7 +266,7 @@ hot.sel <- c(5, 25, 45, 100,  125, 175)
 
 ### Heatmaps
 
-```{r,fig.asp=1.4}
+```{r,fig.asp=1.4,include=FALSE,eval=FALSE}
 heatmaps <- mapply(function(div, s) {
   div[, depth := as.numeric(as.character(depth))]
   ggplot(div, aes(x = month.i, y = month.j)) +
