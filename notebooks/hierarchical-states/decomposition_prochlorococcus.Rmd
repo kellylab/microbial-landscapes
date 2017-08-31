@@ -31,35 +31,31 @@ num2fac <- function(v, ...) {
 }
 ```
 
-Average over multiple time points in a single month:
-```{r}
-ts <- prochlorococcus[, .(abundance = mean(abundance)), by = .(site,
-                                                               depth,
-                                                               ecotype,
-                                                               month,
-                                                               year,
-                                                               cal.month)
-                      ]
-```
-
 ## Relative abundance time series
 ```{r,fig.asp=1}
-ts[, rel.abund := abundance / sum(abundance),
+# Average over multiple time points in a single month:
+time.series <- prochlorococcus[, .(abundance = mean(abundance)), 
+                               by = .(site,
+                                      depth,
+                                      ecotype,
+                                      month,
+                                      year,
+                                      cal.month)]
+time.series[, rel.abund := abundance / sum(abundance),
    by = .(site, depth, month)]
-ts[, log.rel.abund := log10(rel.abund)]
-ggplot(ts, aes(x = month, y = log.rel.abund)) +
+time.series[, log.rel.abund := log10(rel.abund)]
+ggplot(time.series, aes(x = month, y = log.rel.abund)) +
   geom_path(aes(group = depth, color = depth)) +
   facet_grid(ecotype ~ site, scales = "free_y") +
+  scale_color_gradient(low = "lightblue", high = "blue") +
   labs(y = "log relative abundance")
+time.series <- dcast(time.series, site + depth + month ~ ecotype, value.var = "rel.abund")
 ```
 
 ## Spectral analysis
-```{r}
-ts <- dcast(ts, site + depth + month ~ ecotype, value.var = "rel.abund")
-```
 ```{r,fig.asp=1}
 library(imputeTS)
-spectra <- ts[, {
+spectra <- time.series[, {
   m <- as.matrix(.SD) 
   m <- m[order(month),]
   m <- m[, setdiff(colnames(m), "month")] # get rid of month col
@@ -80,36 +76,61 @@ spectra <- melt(spectra, id.vars = c("site", "depth", "freq"),
                 value.name = "spectrum")
 spectra %>% 
   ggplot(aes(x = freq, y = spectrum)) +
+  geom_vline(xintercept = 1 / 12, color = "red") +
   geom_line(aes(group = depth, color = depth)) +
-  facet_grid(ecotype ~ site, scales = "free_y")
+  scale_color_gradient(low = "lightblue", high = "blue") +
+  facet_grid(ecotype ~ site, scales = "free_y") + 
+  labs(x = "frequency (1/month)")
 ```
 
-```{r bats-spec, fig.asp=1}
-# spectral analysis per ecotype per depth
-# mean per month if more than one sample
-bats.depthlra <- bats[, .(mn = mean(log.rel.abund)), 
-                      by = .(month, depth, ecotype)]
-bats.spec <- bats.depthlra[, {
-  s <- stats::spectrum(mn, plot = FALSE)
-  data.table(freq = s$freq, spec = s$spec)
-  }, by = .(ecotype, depth)]
-# normalize so peak is 1
-bats.spec[, spec := spec / max(spec), by = .(depth, ecotype)]
-bats.spec[, timescale.months := 1 / freq]
-ggplot(bats.spec, aes(x = timescale.months, y = spec)) +
-  geom_point(size = 0.5) +
-  geom_path(aes(group = ecotype)) +
-  facet_grid(depth ~ ecotype) +
-  geom_vline(aes(linetype = "12"), xintercept = 12, color = "blue") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-```
-Blue line indicates periodicity of 1 year.
+Red line indicates periodicity of 1 year.
 Relative height of peaks gives relative magnitude of periodic fluctuations at that time scale.
 This shows that not all ecotypes at all depths are most strongly driven by annual cycling.
 E.g. e9312 apparently experiences strong annual cycling at all depths except 100.
 NATL experiences annual cycling at all depths but it is relatively weaker at depths 160-200.
 
 ## Jensen-Shannon divergence
+
+Read pre-computed JSDs.
+See `make_all_jsds.R` for details.
+```{r}
+jsds <- fread("jsds/prochlorococcus.txt")
+jsds[, distance := sqrt(jsd)]
+# convert time stamps to ordinal
+setnames(jsds, c("month.i", "month.j"), c("cal.month.i", "cal.month.j"))
+jsds[, c("month.i", "month.j") := mapply(function(yr, mo) {
+  mo + 12 * (yr - min(yr))
+},
+yr = list(year.i, year.j), 
+mo = list(cal.month.i, cal.month.j), 
+SIMPLIFY = FALSE)
+]
+jsds[, c("sample.i", "sample.j") := mapply(function(mo, dp) {
+  paste(mo, dp, sep = "_")
+},
+mo = list(month.i, month.j),
+dp = list(depth.i, depth.j),
+SIMPLIFY = FALSE)
+]
+jsds[, delta := month.j - month.i]
+```
+
+### Path plots
+```{r}
+setkey(jsds, site)
+mds.out <- lapply(c(bats = "bats", hot = "hot"), function(sit, jsds) {
+  site.dt <- jsds[sit]
+  edges <- site.dt[delta == 1, .(month.i, month.j)]
+  vertices <- unique(jsds[, .(sample.i, month.i, depth.i, year.i, cal.month.i)])
+  dm <- MakeDistMatrix(site.dt, "sample.i", "sample.j")
+  if (any(is.na(dm))) {
+    browser()
+  }
+  coords <- CoordCMDS(dm)
+}, jsds = jsds)
+```
+
+
 ```{r bats-states}
 setkey(bats, month)
 # all pairs
