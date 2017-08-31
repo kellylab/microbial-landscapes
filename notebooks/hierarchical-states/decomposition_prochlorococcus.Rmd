@@ -43,7 +43,7 @@ ts <- prochlorococcus[, .(abundance = mean(abundance)), by = .(site,
 ```
 
 ## Relative abundance time series
-```{r}
+```{r,fig.asp=1}
 ts[, rel.abund := abundance / sum(abundance),
    by = .(site, depth, month)]
 ts[, log.rel.abund := log10(rel.abund)]
@@ -57,22 +57,31 @@ ggplot(ts, aes(x = month, y = log.rel.abund)) +
 ```{r}
 ts <- dcast(ts, site + depth + month ~ ecotype, value.var = "rel.abund")
 ```
-```{r}
+```{r,fig.asp=1}
 library(imputeTS)
 spectra <- ts[, {
-  m <- as.matrix(.SD) # TODO get rid of month col
+  m <- as.matrix(.SD) 
   m <- m[order(month),]
+  m <- m[, setdiff(colnames(m), "month")] # get rid of month col
   m[is.nan(m)] <- NA
   m <- as.ts(m)
   m <- na.interpolation(m)
   sp <- stats::spectrum(m, plot = FALSE)
-  ll <- lapply(seq_len(ncol(sp$spec)), function(i) sp$spec[, i])
+  spec <- sp$spec
+  spec <- sweep(spec, 2, colMeans(spec, na.rm = TRUE), "/") # normalize
+  ll <- lapply(seq_len(ncol(spec)), function(i) spec[, i])
   names(ll) <- sp$snames
   ll$freq <- sp$freq
   ll
   }, 
   by = .(site, depth)]
-spectra <- dcast(spectra, id.vars = c("site", "depth", "freq"))
+spectra <- melt(spectra, id.vars = c("site", "depth", "freq"),
+                variable.name = "ecotype",
+                value.name = "spectrum")
+spectra %>% 
+  ggplot(aes(x = freq, y = spectrum)) +
+  geom_line(aes(group = depth, color = depth)) +
+  facet_grid(ecotype ~ site, scales = "free_y")
 ```
 
 ```{r bats-spec, fig.asp=1}
