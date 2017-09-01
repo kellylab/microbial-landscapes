@@ -1,6 +1,7 @@
 library(tidyverse)
 library(data.table)
 library(philentropy)
+library(infograf)
 
 source("../../../../wkc.r-utils/df_2_mat.R")
 source("../../../../wkc.r-utils/mat_2_df.R")
@@ -45,7 +46,7 @@ prochlorococcus[, rel.abund := abundance / sum(abundance),
 # get rid of rows where relative abundance is NaN; this is when nothing was
 # sampled
 prochlorococcus <- prochlorococcus[!is.nan(rel.abund)]
-prochlorococcus[, sample := paste(site, year, cal.month, depth, sep = "_")]
+prochlorococcus[, sample := paste(year, cal.month, depth, sep = "_")]
 # pairwise JSDs
 proch.jsds <- prochlorococcus[, jsds_from_d(.SD,
                                             "sample",
@@ -53,18 +54,15 @@ proch.jsds <- prochlorococcus[, jsds_from_d(.SD,
                                             "rel.abund"),
                               by = site]
 # philentropy::JSD gives NaN if there are zeros
-# find these pairs and calculate the JSD from philentropy::KL, which works
-# TODO this is crashing
+# find these pairs and calculate the JSD with my own function
 setkey(prochlorococcus, site, sample)
 proch.jsds[is.nan(jsd), jsd := {
   sit <- site
   x <- prochlorococcus[.(sit, c(sample.i, sample.j))]
   x <- dcast(x, sample ~ ecotype, value.var = "rel.abund")
+	x <- as.data.frame(x)
   m <- df_2_mat(x)
-  kl1 <- KL(m)
-  m <- m[rev(seq(nrow(m))),]
-  kl2 <- KL(m)
-  mean(kl1, kl2)
+  genJSD(t(m))
 },
 by = .(site, sample.i, sample.j)]
 proch.jsds[, c("year.i", "month.i", "depth.i") := tstrsplit(sample.i, "_")]
