@@ -19,10 +19,12 @@ jsds_from_d <- function(d, sample.cn, var.cn, val.cn, suf = c(".i", ".j")) {
   si <- paste0(sample.cn, suf[1])
   sj <- paste0(sample.cn, suf[2])
   jsds <- mat_2_df(jsds, row.names = si)
+  jsds <- as.data.table(jsds)
   melt(jsds,
        id.vars       = si,
        variable.name = sj,
-       value.name = "jsd")
+       value.name = "jsd",
+       variable.factor = FALSE)
 }
 
 # Prochlorococcus ---------------------------------------------------------
@@ -52,6 +54,7 @@ proch.jsds <- prochlorococcus[, jsds_from_d(.SD,
                               by = site]
 # philentropy::JSD gives NaN if there are zeros
 # find these pairs and calculate the JSD from philentropy::KL, which works
+# TODO this is crashing
 setkey(prochlorococcus, site, sample)
 proch.jsds[is.nan(jsd), jsd := {
   sit <- site

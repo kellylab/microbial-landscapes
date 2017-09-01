@@ -15,6 +15,7 @@ library(data.table)
 library(cowplot)
 library(ggraph)
 library(igraph)
+library(imputeTS)
 source("utils.R")
 knitr::opts_chunk$set(
   fig.path = "decomposition_prochlorococcus_figs/",
@@ -54,7 +55,6 @@ time.series <- dcast(time.series, site + depth + month ~ ecotype, value.var = "r
 
 ## Spectral analysis
 ```{r,fig.asp=1}
-library(imputeTS)
 spectra <- time.series[, {
   m <- as.matrix(.SD) 
   m <- m[order(month),]
