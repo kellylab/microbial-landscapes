@@ -16,7 +16,8 @@ library(cowplot)
 library(ggraph)
 library(igraph)
 library(imputeTS)
-source("utils.R")
+library(infograf)
+# source("utils.R")
 knitr::opts_chunk$set(
   fig.path = "decomposition_prochlorococcus_figs/",
   fig.keep = "high",
@@ -113,6 +114,39 @@ dp = list(depth.i, depth.j),
 SIMPLIFY = FALSE)
 ]
 jsds[, delta := month.j - month.i]
+```
+
+### Time-lagged JSD
+```{r,fig.asp=1}
+setkey(jsds, site)
+plot_grid(plotlist = lapply(c("bats", "hot"), function(si, jsds) {
+  sd <- jsds[si][depth.i == depth.j]
+  sd[, c("month.i", "month.j") := lapply(list(month.i, month.j), num2fac)]
+  ggplot(sd, aes(x = month.i, y = month.j)) +
+    geom_tile(aes(fill = jsd)) +
+    facet_wrap(~ depth.i, nrow = 2, scales = "free") +
+    theme(axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          aspect.ratio = 1) +
+    labs(title = si, x = "month", y = "month")
+},
+jsds = jsds
+), ncol = 1)
+```
+
+### Correlograms
+```{r, fig.asp=1}
+plot_grid(plotlist = lapply(c("bats", "hot"), function(si, jsds) {
+  sd <- jsds[si][delta > 0 & depth.i == depth.j]
+  ggplot(sd, aes(x = delta, y = jsd)) +
+    geom_point(size = 0.1, alpha = 0.1) +
+    geom_smooth() +
+    facet_wrap(~ depth.i, nrow = 2, scales = "free") +
+    theme(axis.text.x = element_text(size = 8)) +
+    labs(title = si)
+},
+jsds = jsds
+), ncol = 1)
 ```
 
 ### Path plots
