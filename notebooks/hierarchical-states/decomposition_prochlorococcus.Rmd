@@ -172,19 +172,21 @@ ggplot(eig, aes(x = rank, y = value ^ 2)) +
 
 Plots:
 ```{r}
+# nodes in the upcoming path plot
+samples <- unique(prochlorococcus[, .(site,
+                                      month,
+                                      year,
+                                      cal.month,
+                                      depth)])
+samples[, sample := paste(month, depth, sep = "_")]
 xform <- lapply(sites, function(si, out) {
   out[[si]]$points
 },
 out = mds.out) %>% 
   rbindlist(idcol = "site")
-prochlorococcus[, sample := paste(month, depth, sep = "_")]
-xform <- merge(xform, unique(prochlorococcus[, .(site, 
-                                        sample, 
-                                        month, 
-                                        year, 
-                                        cal.month, 
-                                        depth)]),
-                    by = c("site", "sample"))
+setkey(samples, site, sample)
+setkey(xform, site, sample)
+xform <- samples[xform]
 setcolorder(xform, c("sample", setdiff(names(xform), "sample")))
 setkey(xform, site)
 setkey(jsds, site)
@@ -246,7 +248,7 @@ modules <- lapply(modules, function(com) {
 Merge cluster labels with data:
 ```{r}
 # assign samples to clusters
-samples <- merge(samples, modules, by = c("site", "sample")) 
+xform <- merge(xform, modules, by = c("site", "sample")) 
 # assign paired samples to clusters
 jsds <- merge(jsds, modules, by.x = c("site", "sample.i"), 
               by.y = c("site", "sample")) 
@@ -279,6 +281,23 @@ plot_grid(plotlist = lapply(sites, function(si, grafs, xform) {
 grafs = grafs, xform = xform),
 nrow = 2, labels = sites)
 ```
+
+### Density
+```{r,fig.asp=1.8}
+setkey(xform, site)
+plot_grid(plotlist = lapply(sites, function(si, xform) {
+  xf <- xform[si]
+  ggplot(xf, aes(x = x, y = y)) +
+    stat_density_2d(aes(color = as.character(cluster))) +
+    labs(color = "cluster") +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1) +
+    facet_wrap(~ depth, ncol = 4)
+}, xform = xform),
+nrow = 2, labels = sites)
+```
+
+
 ```{r,fig.asp=1.2}
 setkey(samples, site)
 plot_grid(plotlist = lapply(sites, function(si, samples) {
