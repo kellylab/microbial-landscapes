@@ -289,18 +289,46 @@ setkey(xform, site)
 xform[, cluster := as.character(cluster)]
 plot_grid(plotlist = lapply(sites, function(si, xform) {
   xf <- xform[si]
-  ggplot(xf, aes(x = x, y = y, color = cluster)) +
-    geom_point() +
-    # hack bc bats-40m has 1 pt in cluster 2 causing contours to fail for 
-    # whole subplot
-    geom_density_2d(data = xf[cluster == "1"]) +
-    geom_density_2d(data = xf[cluster == "2"]) + 
-    labs(color = "cluster") +
+  ggplot(xf, aes(x = x, y = y)) +
+    geom_density_2d(color = "grey50") +
+    geom_point(aes(color = cluster)) +
+    labs(color = "state") +
     theme_graph(base_family = "Helvetica") +
     theme(aspect.ratio = 1) +
     labs(title = si) +
     facet_wrap(~ depth, ncol = 4)
 }, xform = xform),
+nrow = 2)
+```
+
+### Dynamical landscape as vector fields
+```{r,fig.asp=1}
+setkey(jsds, site)
+setkey(xform, site)
+library(ggquiver)
+# TODO make this work
+plot_grid(plotlist = lapply(sites, function(si, xform, jsds) {
+  xf <- xform[si, .(site, sample, x, y)]
+  j <- jsds[si]
+  merged <- merge(j, xf, by.x = c("site", "sample.i"), 
+                  by.y = c("site", "sample"))
+  merged <- merge(merged, xf, by.x = c("site", "sample.j"), 
+                  by.y = c("site", "sample"), 
+                  suffixes = c(".i", ".j"))
+  merged[, c("dx", "dy") := list(
+    x.j - x.i,
+    y.j - y.i
+  )]
+  # normalization
+  merged[, m := sqrt(dx ^ 2 + dy ^ 2)]
+  merged[, c("dx", "dy") := lapply(list(dx, dy), function(v, m) v / m, m = m)]
+  # /normalization
+  ggplot(merged, aes(x = x.i, y = y.i)) +
+    geom_quiver(aes(u = dx, v = dy)) +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1) +
+    labs(title = si)
+}, xform = xform, jsds = jsds[delta == 1 & depth.i == depth.j]),
 nrow = 2)
 ```
 
