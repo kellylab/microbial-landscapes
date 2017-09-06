@@ -302,12 +302,13 @@ nrow = 2)
 ```
 
 ### Dynamical landscape as vector fields
-```{r,fig.asp=1}
+```{r,fig.asp=1.8}
 setkey(jsds, site)
 setkey(xform, site)
 library(ggquiver)
 # TODO make this work
-plot_grid(plotlist = lapply(sites, function(si, xform, jsds) {
+bins <- 20
+plot_grid(plotlist = lapply(sites, function(si, xform, jsds, bins) {
   xf <- xform[si, .(site, sample, x, y)]
   j <- jsds[si]
   merged <- merge(j, xf, by.x = c("site", "sample.i"), 
@@ -319,16 +320,21 @@ plot_grid(plotlist = lapply(sites, function(si, xform, jsds) {
     x.j - x.i,
     y.j - y.i
   )]
-  # normalization
-  merged[, m := sqrt(dx ^ 2 + dy ^ 2)]
-  merged[, c("dx", "dy") := lapply(list(dx, dy), function(v, m) v / m, m = m)]
-  # /normalization
-  ggplot(merged, aes(x = x.i, y = y.i)) +
-    geom_quiver(aes(u = dx, v = dy)) +
+  # binning
+  merged[, bin.x := floor(scales::rescale(x.i, to = c(0, bins)))]
+  merged[, bin.y := floor(scales::rescale(y.i, to = c(0, bins))), by = site]
+  mean.vecs <- merged[, .(dx = mean(dx),
+                          dy = mean(dy),
+                          depth = depth.i,
+                          n = .N), by = .(bin.x, bin.y, depth.i)]
+  ggplot(mean.vecs, aes(x = bin.x, y = bin.y, 
+                        xend = bin.x + dx, yend = bin.y + dy)) +
+    geom_segment(aes(color = n), arrow = arrow(length = unit(5, "points"))) +
+    facet_wrap(~ depth) +
     theme_graph(base_family = "Helvetica") +
     theme(aspect.ratio = 1) +
     labs(title = si)
-}, xform = xform, jsds = jsds[delta == 1 & depth.i == depth.j]),
+}, xform = xform, jsds = jsds[delta == 1 & depth.i == depth.j], bins = bins),
 nrow = 2)
 ```
 
