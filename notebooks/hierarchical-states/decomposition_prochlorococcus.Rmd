@@ -25,12 +25,7 @@ knitr::opts_chunk$set(
 )
 data.dir <- "../../data/"
 source("load_prochlorococcus_data.R")
-
-num2fac <- function(v, ...) {
-  uv <- unique(v)
-  factor(as.character(v),
-         levels = as.character(sort(uv), ...))
-}
+source("~/github_bitbucket/wkc.r-utils/num_2_fac.R")
 ```
 
 ## Relative abundance time series
@@ -121,7 +116,7 @@ jsds[, delta := month.j - month.i]
 setkey(jsds, site)
 plot_grid(plotlist = lapply(c("bats", "hot"), function(si, jsds) {
   sd <- jsds[si][depth.i == depth.j]
-  sd[, c("month.i", "month.j") := lapply(list(month.i, month.j), num2fac)]
+  sd[, c("month.i", "month.j") := lapply(list(month.i, month.j), num_2_fac)]
   ggplot(sd, aes(x = month.i, y = month.j)) +
     geom_tile(aes(fill = jsd)) +
     facet_wrap(~ depth.i, nrow = 2, scales = "free") +
@@ -305,9 +300,7 @@ nrow = 2)
 ```{r,fig.asp=1.8}
 setkey(jsds, site)
 setkey(xform, site)
-library(ggquiver)
-# TODO make this work
-bins <- 20
+bins <- 10
 plot_grid(plotlist = lapply(sites, function(si, xform, jsds, bins) {
   xf <- xform[si, .(site, sample, x, y)]
   j <- jsds[si]
@@ -351,7 +344,7 @@ plot_grid(plotlist = lapply(sites, function(si, grafs, xform) {
     coor <- coor[sample %in% V(g)$name]
   }
   ggraph(g, "manual", node.positions = coor) +
-    geom_edge_link(aes(color = num2fac(node2.cluster)), 
+    geom_edge_link(aes(color = num_2_fac(node2.cluster)), 
                    arrow = arrow(length = unit(5, "points"))#,
                    # end_cap = square(length = 1, unit = "points")
                    ) +
@@ -383,7 +376,7 @@ setkey(jsds, site)
 plot_grid(plotlist = lapply(sites, function(si, jsd) {
   j <- jsd[si]
   ggplot(j[delta == 1 & depth.i == depth.j], 
-         aes(x = num2fac(cal.month.i))) +
+         aes(x = num_2_fac(cal.month.i))) +
     stat_count(aes(fill = transition)) +
     scale_x_discrete(breaks = as.character(seq(to = 112, by = 3))) +
     labs(title = si, x = "calendar month") +

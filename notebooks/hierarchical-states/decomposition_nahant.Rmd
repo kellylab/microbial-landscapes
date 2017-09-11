@@ -210,6 +210,7 @@ Try to find states as modules in the network of JSDs between timepoints.
 Reference: [Blondel 2008](https://arxiv.org/abs/0803.0476).
 
 ```{r}
+day.div[, similarity := 1 - jsd]
 graf <- graph_from_data_frame(day.div[as.numeric(day.i) < as.numeric(day.j), 
                                       .(day.i, day.j, weight = similarity)], 
                               directed = FALSE, 
