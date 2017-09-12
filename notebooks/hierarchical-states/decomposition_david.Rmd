@@ -8,6 +8,10 @@ library(data.table)
 library(cowplot)
 library(ggraph)
 library(igraph)
+library(infograf)
+
+source("~/github_bitbucket/wkc.r-utils/df_2_mat.R")
+source("~/github_bitbucket/wkc.r-utils/mat_2_df.R")
 
 david.jsds <- fread("jsds/david.txt")
 source("load_david_data.R")
@@ -32,12 +36,13 @@ SIMPLIFY = FALSE) %>% rbindlist(use.names = TRUE)
 # collapse event labels per day
 unique.day.events <- events[, .(event = paste(event, collapse = " + ")), 
                            by = .(subject, day)]
-unique.day.events[, day := as.character(day)]
 # merge
 david.jsds <- merge(david.jsds, unique.day.events, 
-                    by.x = c("subject.i", "day.i"))
+                    by.x = c("subject.i", "day.i"),
+                    by.y = c("subject", "day"))
 david.jsds <- merge(david.jsds, unique.day.events, 
                     by.x = c("subject.j", "day.j"),
+                    by.y = c("subject", "day"),
                     suffixes = c(".i", ".j"))
 ```
 
@@ -73,26 +78,45 @@ dens <- p0 + stat_density(aes(fill = subject.i), alpha = 0.5,
 plot_grid(cdf, dens, nrow = 2, align = "hv")
 ```
 
-### Paths
+## Paths
 ```{r david-path-plots,fig.width=7,fig.height=7}
 david.subjects <- c("A", "B")
 names(david.subjects) <- david.subjects
-setkey(david.div, subject.i, subject.j)
-dm <- MakeDistMatrix(david.div, "sample.i", "sample.j")
+setkey(david.jsds, subject.i, subject.j)
+# make a unique ID string for each sample
+david.jsds[, c("sample.i", "sample.j") := lapply(list(
+  list(subj = subject.i, day = day.i),
+  list(subj = subject.j, day = day.j)), function(il) {
+    paste(il$subj, il$day, sep = "_")
+  })]
+dm <- MakeDistMatrix(david.jsds, "sample.i", "sample.j")
 fit <- CoordCMDS(dm)
-xform <- fit$points
+xform <- fit$points %>% 
+  as.data.table
 setcolorder(xform, c("sample", "x", "y"))
 setkey(xform, sample)
 # put sample labels at first 2 columns
-setcolorder(david.div, c("sample.i", "sample.j",
-                         names(david.div)[!(names(david.div) %in%
-                                              c("sample.i", "sample.j"))])
+setcolorder(david.jsds, c("sample.i", "sample.j",
+                         names(david.jsds)[!(grepl("sample", names(david.jsds)))])
             )
-david.samples[, day := as.numeric(day)]
-setcolorder(david.samples, c("sample", "subject", "day", "event", "idx", 
-                             "subj.idx"))
+david.samples <- unique(david.jsds[, .(sample = sample.i,
+                                          subject = subject.i,
+                                          day = day.i,
+                                          event = event.i)])
+# some days are skipped so rank day to make consecutive indices
+david.samples[, idx := frank(day), by = subject]
+setkey(david.samples, sample)
+setkey(david.jsds, sample.i)
+david.jsds <- david.jsds[david.samples[, .(sample, idx.i = idx)]] 
+setkey(david.jsds, sample.j)
+david.jsds <- david.jsds[david.samples[, .(sample, idx.j = idx)]] 
+david.jsds[, increment := idx.j - idx.i]
+setcolorder(david.samples, c("sample", "subject", "day", "event"))
+```
+```{r,fig.asp=1}
+#plotting
 graf <- graph_from_data_frame(
-  david.div[subject.i == subject.j & increment == 1],
+  david.jsds[subject.i == subject.j & increment == 1],
   directed = TRUE,
   vertices = david.samples
   )
@@ -100,36 +124,99 @@ setkey(xform, sample)
 xform <- xform[V(graf)$name]
 lo <- create_layout(graf, "manual", node.positions = xform)
 nsize <- 1
-p1 <- ggraph(lo) +
-  geom_edge_link(arrow = arrow(length = unit(3, "points"), type = "closed"),
-                 end_cap = square(length = 3, unit = "points"),
-                 edge_width = 0.2) +
-  geom_node_point(aes(color = day), size = nsize) +
-  scale_color_distiller(palette = "Blues") +
-  facet_nodes(~ subject) +
-  theme_graph(base_family = "Helvetica") +
-  theme(aspect.ratio = 1)
-p2 <- ggraph(lo) +
-  geom_edge_link(arrow = arrow(length = unit(3, "points"), type = "closed"),
-                 end_cap = square(length = 3, unit = "points"),
-                 edge_width = 0.2) +
-  geom_node_point(aes(color = event), size = nsize) +
-  facet_nodes(~ subject) +
-  theme_graph(base_family = "Helvetica") +
-  theme(aspect.ratio = 1)
-plot_grid(p1, p2, nrow = 2, align = "v")
+plot_paths_with_var <- function(var, lo) {
+  ggraph(lo) +
+    geom_edge_link(arrow = arrow(length = unit(3, "points"), type = "closed"),
+                   end_cap = square(length = 3, unit = "points"),
+                   edge_width = 0.2) +
+    geom_node_point(aes_string(color = var), size = nsize) +
+    facet_nodes(~ subject) +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1)
+}
+plot_grid(plotlist = lapply(c("day", "event"), function(var, lo) {
+  p <- plot_paths_with_var(var, lo)
+  if (var == "day") {
+    p <- p + scale_color_distiller(palette = "Blues")
+  }
+  p
+}, lo = lo),
+nrow = 2, align = "v")
 ```
-Laying both subjects along the same axes we see each subject is more similar to themselves than they are to the other subject, for the most part.
+
+Major separation is between subjects.
 The upper right represents states in which the two subjects resembled each other.
 Interestingly not all these points seem to be close in time.
 Subject B makes a brief excursion to a Subject A-like state post Salmonella.
 
 Eigenvalues by rank:
-```{r david-eigen-rank}
+```{r}
 ggplot(fit$eigrank, aes(x = rank, y = value ^ 2)) +
   geom_point()
 ```
 
+## Louvain
+
+Cluster each subject separately.
+```{r}
+setkey(david.jsds, subject.i)
+clusters <- lapply(c("A", "B"), function(subj, jsds) {
+  cl <- jsds[subj, .(sample.i, sample.j, weight = 1 - jsd)] %>% 
+          unique %>% 
+          .[weight < 0, weight := 0] %>%  #precision error
+          graph_from_data_frame(directed = FALSE) %>% 
+          simplify(remove.loops = FALSE, edge.attr.comb = "first") %>% 
+          cluster_fast_greedy
+  mem <- membership(cl)
+  data.table(sample = names(mem), cluster = paste0(subj, mem))
+}, jsds = david.jsds[subject.i == subject.j]) %>% 
+  rbindlist
+setkey(clusters, sample)
+V(graf)$cluster <- clusters[V(graf)$name, cluster]
+lo <- create_layout(graf, "manual", node.positions = xform)
+p <- plot_paths_with_var("cluster", lo)
+p <- p + scale_color_brewer(palette = "Set3")
+p
+```
+```{r}
+setkey(david.samples, sample)
+setkey(clusters, sample)
+setkey(xform, sample)
+david.samples[clusters[xform]] %>% 
+  ggplot(aes(x = x, y = y)) +
+  stat_density_2d(color = "grey50") +
+  geom_point(aes(color = cluster), alpha = 0.5) +
+  scale_color_brewer(palette = "Set3") +
+  facet_wrap(~ subject) +
+  labs(color = "cluster") +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+```
+
+
+```{r}
+setkey(david.samples, sample)
+setkey(clusters, sample)
+david.samples[clusters] %>% 
+  ggplot(aes(x = day, y = cluster)) +
+  # geom_point(aes(color = event), size = 0.5) +
+  geom_line(aes(group = subject, color = event)) +
+  scale_color_brewer(palette = "Dark2") +
+  facet_wrap(~ subject, nrow = 2, scales = "free_y")
+```
+
+### Probability
+```{r}
+library(philentropy)
+david.samples[clusters] %>% 
+  .[, {
+  n.cl <- .SD[, .N, by = cluster]
+  n.ev <- .SD[, .N, by = event]
+  n.j <- .SD[, .N, by = .(cluster, event)]
+  mi <- MI(n.cl[, N / sum(N)], n.ev[, N / sum(N)], n.j[, N / sum(N)])
+  list(mi = mi)
+}, by = subject]
+```
 
 
 ### Trees
