@@ -2,7 +2,7 @@
 title: "Decomposition of states and time scales in 2 healthy human gut microbiomes"
 output: html_notebook
 ---
-```{r}
+```{r setup}
 library(tidyverse)
 library(data.table)
 library(cowplot)
@@ -11,10 +11,10 @@ library(igraph)
 
 david.jsds <- fread("jsds/david.txt")
 source("load_david_data.R")
-```
+david.jsds[, c("day.i", "day.j") := lapply(list(day.i, day.j), as.numeric)]
+david.jsds[, day.delta := day.j - day.i]
+david.jsds[, distance := sqrt(jsd)]
 
-Merge event metadata:
-```{r}
 # metadata
 setkey(david, subject)
 events <- mapply(function(start, end, subject, event) {
@@ -33,26 +33,25 @@ SIMPLIFY = FALSE) %>% rbindlist(use.names = TRUE)
 unique.day.events <- events[, .(event = paste(event, collapse = " + ")), 
                            by = .(subject, day)]
 unique.day.events[, day := as.character(day)]
-david.samples <- merge(david.samples, unique.day.events, 
-                       by = c("subject", "day"))
-david.div <- merge(david.div, unique.day.events, by.x = c("subject.i", "day.i"),
-                   by.y = c("subject", "day"))
-david.div <- merge(david.div, unique.day.events, by.x = c("subject.j", "day.j"),
-                   by.y = c("subject", "day"), suffixes = c(".i", ".j"))
+# merge
+david.jsds <- merge(david.jsds, unique.day.events, 
+                    by.x = c("subject.i", "day.i"))
+david.jsds <- merge(david.jsds, unique.day.events, 
+                    by.x = c("subject.j", "day.j"),
+                    suffixes = c(".i", ".j"))
 ```
 
 The magnitudes of day-to-day changes in composition don't reflect significant events.
 ```{r david-stepsizes-day}
-setkey(david.div, subject.i, subject.j)
+setkey(david.jsds, subject.i, subject.j)
 event.lims <- events[, .(start = min(day), end = max(day)), 
                      by = .(event, subject)]
 event.lims <- event.lims[!grepl("pre", event) & !grepl("post", event)]
 event.lims[, event := factor(levels = c("travel", "diarrhea 1", "diarrhea 2",
                                         "Salmonella"), event)]
-david.div[subject.i == subject.j & day.delta == 1] %>% 
-  mutate(day.i = as.numeric(day.i)) %>% 
+david.jsds[subject.i == subject.j & day.delta == 1] %>% 
   setnames("subject.i", "subject") %>% 
-  ggplot(aes(x = day.i, y = distance)) +
+  ggplot(aes(x = day.i, y = jsd)) +
   geom_rect(data = event.lims, 
     mapping = aes(fill = event, xmin = start, xmax = end, 
                   ymin = 0.1, ymax = 1.05
@@ -64,15 +63,14 @@ david.div[subject.i == subject.j & day.delta == 1] %>%
 Distributions of all distances for all time scales.
 We see that both length distributions are multimodal, indicating at least 2 compositional "length scales."
 We also see that the vast majority of A distances belong to the lowest mode, while the second lowest mode of B is as high as the lowest, indicating that subject B spends a significant amount of time (relative to the length of the entire measurement).
-```{r david-all-dist-distrib,fig.width=5,fig.height=5}
-p0 <- ggplot(david.div[subject.i == subject.j], aes(x = distance)) 
-ar <- 3 / 5
+```{r}
+p0 <- ggplot(david.jsds[subject.i == subject.j], aes(x = distance)) 
 cdf <- p0 + stat_ecdf(aes(color = subject.i)) + labs(y = "ECDF") +
-  theme(aspect.ratio = ar)
+  labs(color = "subject")
 dens <- p0 + stat_density(aes(fill = subject.i), alpha = 0.5, 
-                          position = "identity") +
-  theme(aspect.ratio = ar)
-plot_grid(cdf, dens, nrow = 2, align = "v")
+                          position = "identity")  +
+  labs(fill = "subject")
+plot_grid(cdf, dens, nrow = 2, align = "hv")
 ```
 
 ### Paths
