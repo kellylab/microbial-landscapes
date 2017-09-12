@@ -61,11 +61,8 @@ fwrite(proch.jsds, "jsds/prochlorococcus.txt", sep = "\t")
 
 # David -------------------------------------------------------------------
 
-david <- fread(paste0(data.dir, "david/david.otus"),
-               col.names = c("sample", "otu", "count")
-               )
-# parse subject and timepoints
-david[, c("subject", "day") := tstrsplit(sample, "_")]
+source("load_david_data.R")
+
 david[, rel.abund := count / sum(count), by = .(subject, day)]
 david.jsds <- david[, jsds_from_d(.SD, "sample", "otu", "rel.abund")]
 david.jsds[, c("subject.i", "day.i") := tstrsplit(sample.i, "_")]
@@ -77,4 +74,14 @@ fwrite(david.jsds, "jsds/david.txt", sep = "\t")
 
 # Gordon (cholera) --------------------------------------------------------
 
+source("load_cholera_data.R")
+gordon[, sample := paste(subject, state, hour, sep = "_")]
+gordon[, rel.abund := count / sum(count), by = sample]
+gordon.jsds <- gordon[, jsds_from_d(.SD, "sample", "otu", "rel.abund")]
+gordon.jsds[, c("subject.i", "state.i", "hour.i") :=
+              tstrsplit(sample.i, "_")]
+gordon.jsds[, c("subject.j", "state.j", "hour.j") :=
+              tstrsplit(sample.j, "_")]
+gordon.jsds[, c("sample.i", "sample.j") := NULL]
 
+fwrite(gordon.jsds, "jsds/cholera.txt", sep = "\t")

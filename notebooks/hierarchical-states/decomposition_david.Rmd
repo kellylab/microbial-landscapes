@@ -3,88 +3,27 @@ title: "Decomposition of states and time scales in 2 healthy human gut microbiom
 output: html_notebook
 ---
 ```{r}
-library(dplyr)
+library(tidyverse)
 library(data.table)
 library(cowplot)
 library(ggraph)
 library(igraph)
-source("utils.R")
-knitr::opts_chunk$set(
-  fig.path = "decomposition_nahant_figs/",
-  fig.keep = "high",
-  dev = c("pdf")
-)
-data.dir <- "../../data/"
-david <- fread(paste0(data.dir, "david/david.otus"), 
-               col.names = c("sample", "otu", "count")
-               )
-# parse subject and timepoints
-david.samples <- unique(david[, .(sample)])
-david.samples[, c("subject", "day") := tstrsplit(sample, "_")]
-# log transform otu counts
-david[, log.count := log(count + 1)]
-# split by subject
-david.subjects <- unique(david.samples$subject)
-names(david.subjects) <- david.subjects
-# create tables of day-day divergences
-```
 
-
-```{r,message=FALSE}
-david.div <- data.table(expand.grid(sample.i = david.samples$sample,
-                                    sample.j = david.samples$sample)
-                        )
-david.samples[, idx := 1:.N]
-david.samples[, subj.idx := frank(as.numeric(day)), by = subject]
-david.div <- merge(david.div, david.samples, by.x = "sample.i", 
-                   by.y = "sample")
-david.div <- merge(david.div, david.samples, by.x = "sample.j", 
-                   by.y = "sample", suffixes = c(".i", ".j"))
-david.div <- david.div[idx.j >= idx.i]
-setkey(david, sample)
-david.div[, jsd := {
-  if (sample.i == sample.j) {
-    0
-  } else {
-    sd <- david[c(sample.i, sample.j)]
-    m <- dcast(sd, otu ~ sample, value.var = "count")
-    m <- as.matrix(m[, 2:3])
-    m[is.na(m)] <- 0
-    genJSD(m)
-  }
-}, by = .(sample.i, sample.j)]
-# reciprocal distances
-david.div <- david.div[sample.i != sample.j] %>% 
-  setnames(names(david.div), sapply(names(david.div), function(x) {
-    if (grepl("idx\\.i", x)) {
-      gsub("idx\\.i", "idx\\.j", x)
-    } else if (grepl("idx\\.j", x)) {
-      gsub("idx\\.j", "idx\\.i", x)
-    } else if (grepl("\\.i", x)) {
-      gsub("\\.i", "\\.j", x)
-    } else if (grepl("\\.j", x)) {
-      gsub("\\.j", "\\.i", x)
-    } else x
-  })
-  ) %>%  
-  rbind(david.div)
-david.div[, distance := sqrt(jsd)]
-david.div[, day.delta := as.numeric(day.j) - as.numeric(day.i)]
-david.div[subject.i == subject.j, increment := subj.idx.j - subj.idx.i]
+david.jsds <- fread("jsds/david.txt")
+source("load_david_data.R")
 ```
 
 Merge event metadata:
 ```{r}
 # metadata
-setkey(david.samples, subject)
+setkey(david, subject)
 events <- mapply(function(start, end, subject, event) {
   x <- data.table(day = seq(start, end, by = 1), subject = subject, 
                   event = event)
   x
-}, start = c(0, 71, 80, 104, 123, 
-             0, 151, 160 ),
-end =   c(70, 122, 85, 113, david.samples["A", max(as.numeric(day))], 
-          150, 159, david.samples["B", max(as.numeric(day))]),
+}, start = c(0, 71, 80, 104, 123, 0, 151, 160 ),
+end = c(70, 122, 85, 113, david["A", max(as.numeric(day))], 
+          150, 159, david["B", max(as.numeric(day))]),
 subject = c("A", "A", "A", "A", "A", 
             "B", "B", "B"),
 event = c("US (pre)", "travel", "diarrhea 1", "diarrhea 2", "US (post)", 
