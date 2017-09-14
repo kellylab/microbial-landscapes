@@ -1,6 +1,6 @@
 library(data.table)
 
-david <- fread(paste0(data.dir, "david/david.otus"),
+david <- fread(paste0("../../data/david/david.otus"),
                col.names = c("sample", "otu", "count")
                )
 # parse subject and timepoints

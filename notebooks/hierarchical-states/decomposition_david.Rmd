@@ -111,7 +111,7 @@ david.jsds <- david.jsds[david.samples[, .(sample, idx.i = idx)]]
 setkey(david.jsds, sample.j)
 david.jsds <- david.jsds[david.samples[, .(sample, idx.j = idx)]] 
 david.jsds[, increment := idx.j - idx.i]
-setcolorder(david.samples, c("sample", "subject", "day", "event"))
+setcolorder(david.samples, c("sample", "subject", "day", "event", "idx"))
 ```
 ```{r,fig.asp=1}
 #plotting
@@ -166,7 +166,7 @@ clusters <- lapply(c("A", "B"), function(subj, jsds) {
           .[weight < 0, weight := 0] %>%  #precision error
           graph_from_data_frame(directed = FALSE) %>% 
           simplify(remove.loops = FALSE, edge.attr.comb = "first") %>% 
-          cluster_fast_greedy
+          cluster_louvain
   mem <- membership(cl)
   data.table(sample = names(mem), cluster = paste0(subj, mem))
 }, jsds = david.jsds[subject.i == subject.j]) %>% 

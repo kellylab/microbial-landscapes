@@ -9,99 +9,27 @@ library(data.table)
 library(cowplot)
 library(ggraph)
 library(igraph)
-source("utils.R")
-knitr::opts_chunk$set(
-  fig.path = "decomposition_nahant_figs/",
-  fig.keep = "high",
-  dev = c("pdf")
-)
-data.dir <- "../../data/"
-gordon <- fread(paste0(data.dir, "cholera/gordon.otus"),
-                col.names = c("sample", "otu", "count"))
-# extract sample info
-gordon.samples <- unique(gordon[, .(sample)])
-# create a dummy 'sample index' to help remove reciprocal sample pairs later 
-gordon.samples[, idx := 1:.N]
-gordon.samples[, c("subject", "state", "id") := tstrsplit(sample, "_")]
-gordon.samples[grep("d", id) & state == "recovery", time.unit := "day"]
-gordon.samples[!grep("d", id), time.unit := "hour"]
-gordon.samples[id == "end", time.unit := "hour"]
-setkey(gordon.samples, time.unit)
-gordon.samples["hour", hour := as.numeric(id)]
-gordon.samples["day", hour := 24 * as.numeric(sub("d", "", id))]
-subjects <- unique(gordon.samples$subject)
-# set end hour to last hour + 1, days to end hour + 24 * days
-gordon.samples[, hour := {
-  maxhr <- max(.SD["hour"][id != "end"]$hour)
-  endhr <- maxhr + 1
-  hour[id == "end"] <- endhr
-  hour[time.unit == "day"] <- hour[time.unit == "day"] + endhr
-  hour
-}, by = subject]
-```
+library(infograf)
 
-```{r}
-# all samples vs all samples
-gordon.div <- data.table(expand.grid(sample.i = gordon.samples$sample,
-                                     sample.j = gordon.samples$sample)
-                         )
-# merge sample info
-gordon.div <- merge(gordon.div, gordon.samples, by.x = "sample.i", 
-                    by.y = "sample"
-                    )
-gordon.div <- merge(gordon.div, gordon.samples, by.x = "sample.j", 
-                    by.y = "sample", suffixes = c(".i", ".j")
-                    )
-# remove inverse pairings
-gordon.div <- gordon.div[idx.j >= idx.i]
-# remove dummy variable
-gordon.div[, ":=" (idx.i = NULL, idx.j = NULL)]
-gordon[, log.count := log(count)]
-gordon
-setkey(gordon, sample)
-gordon.div[, jsd := {
-  if (sample.i == sample.j) {
-    0
-  } else{
-    si <- sample.i
-    sj <- sample.j
-    sd <- gordon[c(si, sj)]
-    m <- dcast(sd, otu ~ sample, value.var = "count")
-    m <- as.matrix(m[, 2:3])
-    m[is.na(m)] <- 0
-    genJSD(m)
-  }
-}, by = .(sample.i, sample.j)]
-inv <- gordon.div[sample.i != sample.j]
-setnames(inv, names(inv), sapply(names(inv), function(x) {
-  if (grepl("\\.i", x)) {
-    gsub("\\.i", "\\.j", x)
-  } else if (grepl("\\.j", x)) {
-    gsub("\\.j", "\\.i", x)
-  } else {
-    x
-  }
-}))
-gordon.div <- rbind(gordon.div, inv)
-gordon.div[, distance := sqrt(jsd)]
+source("~/github_bitbucket/wkc.r-utils/num_2_fac.R")
+
+source("load_cholera_data.R")
+gordon.jsds <- fread("jsds/cholera.txt")
+gordon.jsds[, distance := sqrt(jsd)]
 ```
 
 David-style divergence matrices.
 Dark on-diagonal squares represent occupation of stable states.
 Most patients have distinct stable states.
 ```{r gordon-div-matrices,fig.width=7,fig.height=7}
-setkey(gordon.div, subject.i, subject.j)
-subjects <- sort(subjects)
+setkey(gordon.jsds, subject.i, subject.j)
+subjects <- sort(unique(gordon.jsds[, subject.i]))
 names(subjects) <- subjects
-gordon.div[, ":=" (hour.i = as.character(hour.i), hour.j = as.character(hour.j))]
 plots <- lapply(subjects, function(subj) {
-  sd <- gordon.div[.(subj, subj)]
-  ts <- as.numeric(unique(sd$hour.i))
-  lims <- as.character(sort(ts))
-  p <- ggplot(sd, aes(x = hour.i, y = hour.j)) +
+  sd <- gordon.jsds[.(subj, subj)]
+  p <- ggplot(sd, aes(x = num_2_fac(hour.i), y = num_2_fac(hour.j))) +
     geom_tile(aes(fill = jsd)) +
-    scale_x_discrete(limits = lims) +
-    scale_y_discrete(limits = lims) +
+    labs(x = "time", y = "time") +
     theme(aspect.ratio = 1,
           axis.text = element_blank(),
           axis.ticks = element_blank())
@@ -111,9 +39,9 @@ plot_grid(plotlist = plots, ncol = 2, labels = names(plots), align = "hv")
 
 Time-lag divergences:
 ```{r gordon-lag-jsd}
-gordon.div[, delta.t := as.numeric(hour.j) - as.numeric(hour.i)]
+gordon.jsds[, delta.t := hour.j - hour.i]
 plots <- lapply(subjects, function(subj) {
-  sd <- gordon.div[.(subj, subj)]
+  sd <- gordon.jsds[.(subj, subj)]
   sd <- sd[delta.t > 0]
   p <- ggplot(sd, aes(x = delta.t, y = jsd)) +
     geom_point(size = 0.1) +
@@ -129,70 +57,121 @@ plot_grid(plotlist = plots, align = "hv", labels = names(plots),
 Distributions of divergences show that for all patients, diarrhea and recovery states are more similar to themselves than to each other (cross-state divergences are large).
 In most patients (except E) the recovery microbiome is actually less stable than the diarrhea microbiome: the diarrhea divergences tend to be smaller.
 **However** this could also be due to the denser temporal sampling during the diarrhea period.
-We should scale this by the time interval somehow, since it varies.
-```{r gordon-dist-distrib}
-gordon.div[, state := {
+```{r gordon-dist-distrib,fig.asp=1}
+gordon.jsds[, state := {
   if (state.i == state.j) state.i
   else "cross"
 }, by = .(state.i, state.j)]  
-p0 <- gordon.div[(subject.i == subject.j) & (delta.t > 0)] %>% 
-  ggplot(aes(x = distance))
-cdf <- p0 + stat_ecdf(aes(color = state)) + facet_wrap(~ subject.i, nrow = 1) + 
-  labs(y = "ECDF") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-dens <- p0 + stat_density(aes(fill = state), alpha = 0.3,
-                          position = "identity")
-dens <- dens +
-  facet_wrap(~ subject.i, nrow = 1) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-plot_grid(cdf, dens, nrow = 2, align = "v")
+gordon.jsds[(subject.i == subject.j) & (delta.t > 0)] %>% 
+  ggplot(aes(x = subject.i, y = jsd)) +
+  stat_boxplot(aes(color = state)) + coord_flip() +
+  labs(x = "subject")
 ```
 
 ### Paths
 MDS of all subjects simultaneously shows that diarrhea/recovery separates time points more than subject.
 ```{r gordon-paths}
-setkey(gordon.div, subject.i, subject.j)
-setkey(gordon.samples, subject)
-edges <- lapply(subjects, function(subj) {
-  sd <- gordon.div[.(subj, subj)]
-  ts <- as.numeric(unique(sd$hour.i))
-  ts <- as.character(sort(ts))
-  ej <- data.table(ti = ts[-length(ts)], tj = ts[-1])
-  samps <- gordon.samples[subj, .(sample, hour)]
-  samps[, hour := as.character(hour)]
-  ej <- merge(ej, samps, by.x = "ti", by.y = "hour")
-  ej <- merge(ej, samps, by.x = "tj", by.y = "hour", suffixes = c(".i", ".j"))
-  ej[, .(sample.i, sample.j)]
-}) %>% rbindlist()
+setkey(gordon.jsds, subject.i, subject.j)
+gordon.jsds[, c("sample.i", "sample.j") := lapply(list(
+  list(subj = subject.i, state = state.i, hour = hour.i),
+  list(subj = subject.j, state = state.j, hour = hour.j)), function(ll) {
+    paste(ll$subj, ll$state, ll$hour, sep = "_")
+  })]
+# sample order
+gordon.jsds[, idx.i := as.numeric(num_2_fac(hour.i)), by = subject.i]
+gordon.jsds[, idx.j := as.numeric(num_2_fac(hour.j)), by = subject.j]
+gordon.jsds[, increment := idx.j - idx.i]
+edges <- gordon.jsds[subject.i == subject.j & increment == 1]
+setcolorder(edges, c("sample.i", "sample.j", 
+                     names(edges)[!grepl("sample", names(edges))]))
 graf <- graph_from_data_frame(edges,
-                              directed = TRUE, vertices = gordon.samples)
-dm <- MakeDistMatrix(gordon.div, "sample.i", "sample.j")
+                              directed = TRUE, 
+                              vertices = unique(gordon[, .(sample, 
+                                                           subject, 
+                                                           state, 
+                                                           id, 
+                                                           hour)]))
+dm <- MakeDistMatrix(gordon.jsds, "sample.i", "sample.j")
 fit <- CoordCMDS(dm)
-xform <- fit$points
+xform <- fit$points %>% 
+  as.data.table
 # order
 setkey(xform, sample)
 xform <- xform[V(graf)$name]
-lo <- create_layout(graf, "manual", node.positions = xform)
-ggraph(lo) +
-  geom_edge_link(arrow = arrow(type = "closed", length = unit(3, "points")),
-                 edge_width = 0.2, end_cap = square(length = 3,
-                                                    unit = "points")) +
+```
+```{r,fig.asp=1}
+ggraph(graf, "manual", node.positions = xform) +
+  geom_edge_link(arrow = arrow(length = unit(3, "points")),
+                 edge_width = 0.2, 
+                 end_cap = square(length = 3, unit = "points")) +
   geom_node_point(aes(color = state)) +
-  # scale_shape_manual(values = seq(1, length(subjects))) +
-  facet_nodes(~ subject, nrow = 2) +
+  facet_nodes(~ subject) +
   theme_graph(base_family = "Helvetica") +
   theme(aspect.ratio = 1)
+```
+```{r}
 ggplot(fit$eigrank, aes(x = rank, y = value ^ 2)) +
   geom_point() 
 ```
 
 All points plot show recovery and diarrhea cluster separately for all patients, with diarrhea having greater spread:
 ```{r}
-ggraph(lo) +
+ggraph(graf, "manual", node.positions = xform) +
+  geom_density_2d(aes(x = x, y = y), data = xform, color = "grey80") +
   geom_node_point(aes(color = state, shape = subject)) +
-  scale_shape_manual(values = seq(uniqueN(gordon.samples$subject))) +
+  scale_shape_manual(values = seq(uniqueN(gordon$subject))) +
   theme_graph(base_family = "Helvetica") +
   theme(aspect.ratio = 1)
+```
+
+No clear separation of subjects within states with this projection:
+```{r}
+ggraph(graf, "manual", node.positions = xform) +
+  geom_node_point(aes(color = subject)) +
+  scale_shape_manual(values = seq(uniqueN(gordon$subject))) +
+  facet_wrap(~ state) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+```
+
+### Louvain clustering
+```{r}
+clusters <- gordon.jsds[, .(sample.i, sample.j, weight = 1 - jsd)] %>% 
+  graph_from_data_frame(directed = FALSE) %>% 
+  simplify(remove.loops = FALSE, edge.attr.comb = "first") %>% 
+  cluster_louvain
+V(graf)$cluster <- membership(clusters)[V(graf)$name]
+ggraph(graf, "manual", node.positions = xform) +
+  geom_density_2d(aes(x = x, y = y), data = xform, color = "grey80") +
+  geom_node_point(aes(color = num_2_fac(cluster), shape = subject)) +
+  labs(color = "cluster") +
+  scale_shape_manual(values = seq(uniqueN(gordon$subject))) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+```
+
+```{r}
+ggraph(graf, "manual", node.positions = xform) +
+  geom_edge_link(arrow = arrow(length = unit(3, "points")),
+                 edge_width = 0.2, 
+                 end_cap = square(length = 3, unit = "points")) +
+  geom_node_point(aes(color = num_2_fac(cluster), shape = state)) +
+  facet_nodes(~ subject) +
+  labs(color = "cluster") +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+```
+
+```{r}
+gordon[, idx := as.numeric(num_2_fac(hour)), by = subject]
+gordon[, .(sample, subject, idx, state)] %>% 
+  unique %>% 
+  .[, cluster := membership(clusters)[sample]] %>% 
+  ggplot(aes(x = idx, y = num_2_fac(cluster), color = state)) +
+  geom_point(size = 0.5) +
+  geom_line(aes(group = subject)) +
+  labs(y = "cluster") +
+  facet_wrap(~ subject, scales = "free_x")
 ```
 
 ### Tree
@@ -202,7 +181,7 @@ Again separation is mostly diarrhea/recovery.
 However, some diarrhea points are closer to recovery points than they are to the majority of diarrhea points.
 This can also be seen in the last plot where the two 'clouds' enmesh.
 ```{r,fig.width=7,fig.height=7}
-dm <- dcast(gordon.div, sample.i ~ sample.j, value.var = "distance")
+dm <- dcast(gordon.jsds, sample.i ~ sample.j, value.var = "distance")
 rn <- dm[, sample.i] 
 dm <- as.matrix(dm[, -1])
 rownames(dm) <- rn
@@ -230,11 +209,11 @@ ggraph(lo) +
 ```
 
 ```{r gordon-state-clusters,fig.width=7,fig.height=10}
-setkey(gordon.div, subject.i, subject.j)
+setkey(gordon.jsds, subject.i, subject.j)
 gordon.samples[, hour := as.character(hour)]
 setkey(gordon.samples, subject, hour)
 trees <- lapply(subjects, function(subj) {
-  sd <- gordon.div[.(subj, subj)]
+  sd <- gordon.jsds[.(subj, subj)]
   sd <- dcast(sd, hour.i ~ hour.j, value.var = "distance")
   rn <- sd[, hour.i]
   dm <- as.matrix(sd[, -1])
