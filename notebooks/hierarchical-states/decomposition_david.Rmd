@@ -12,6 +12,7 @@ library(infograf)
 
 source("~/github_bitbucket/wkc.r-utils/df_2_mat.R")
 source("~/github_bitbucket/wkc.r-utils/mat_2_df.R")
+source("~/github_bitbucket/wkc.r-utils/num_2_fac.R")
 
 david.jsds <- fread("jsds/david.txt")
 source("load_david_data.R")
@@ -218,13 +219,44 @@ david.samples[clusters] %>%
 }, by = subject]
 ```
 
+## Density-based clustering
+```{r}
+library(dbscan)
+mp <- 3 # min pts should be # dims + 1
+kNNdistplot(xform[, .(x, y)], mp) # identifies knee at y ~ 0.3 for eps value
+xform[, dclust := dbscan(cbind(x, y), 0.3, mp)$cluster]
+xform[dclust == 0, dclust := NA]
+setkey(xform, sample)
+vertex.attributes(graf)$dclust <- num_2_fac(xform[V(graf)$name, dclust])
+```
+
+```{r}
+lo <- create_layout(graf, "manual", node.positions = xform[, .(x, y)])
+plot_paths_with_var("dclust", lo) 
+```
+```{r}
+setkey(david.samples, sample)
+setkey(xform, sample)
+david.samples[xform[, .(sample, dclust)]] %>% 
+  ggplot(aes(x = day, y = num_2_fac(dclust))) +
+  geom_line(aes(group = subject, color = event)) +
+  geom_point(aes(color = event), size = 0.5) +
+  scale_color_brewer(palette = "Dark2") +
+  theme(panel.grid.major.y = element_line(color = "grey80")) +
+  facet_wrap(~ subject, nrow = 2, scales = "free_y")
+```
+### Transitions
+```{r}
+david.samples[xform[, .(sample, dclust)]] %>% 
+  ggplot(aes(x = ))
+```
 
 ### Trees
 
 #### Together
 
 Hierarchical clustering reveals 3 major branches: characteristic of Subject A, characteristic of Subject B, and Shared Outlier State. 
-```{r david-merged-tree,fig.width=7,fig.height=20}
+```{r david-merged-tree,fig.width=7,fig.height=20,include=FALSE,eval=FALSE}
 dm <- dcast(david.div, sample.i ~ sample.j, value.var = "distance")
 rn <- dm$sample.i
 dm <- dm[, -1]
@@ -261,7 +293,7 @@ ggraph(dendro, "dendrogram") +
 #### Separate
 Clustering separately shows that Subject B has distinct pre- and post-Salmonella states, but the various events in Subject A's life didn't create alternate stable states that were significantly different.
 
-```{r david-event-trees,fig.height=9,fig.width=7}
+```{r david-event-trees,fig.height=9,fig.width=7,include=FALSE,eval=FALSE}
 setkey(david.div, subject.i, subject.j)
 dendros <- lapply(david.subjects, function(subj) {
   sd <- david.div[.(subj, subj)]
