@@ -138,7 +138,7 @@ ggraph(graf, "manual", node.positions = xform) +
 ```{r}
 clusters <- gordon.jsds[, .(sample.i, sample.j, weight = 1 - jsd)] %>% 
   graph_from_data_frame(directed = FALSE) %>% 
-  simplify(remove.loops = FALSE, edge.attr.comb = "first") %>% 
+  igraph::simplify(remove.loops = FALSE, edge.attr.comb = "first") %>% 
   cluster_louvain
 V(graf)$cluster <- membership(clusters)[V(graf)$name]
 ggraph(graf, "manual", node.positions = xform) +
