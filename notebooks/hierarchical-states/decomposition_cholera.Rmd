@@ -174,13 +174,29 @@ gordon[, .(sample, subject, idx, state)] %>%
   facet_wrap(~ subject, scales = "free_x")
 ```
 
+## Density clustering
+```{r}
+library(dbscan)
+mp <- 3 # min pts should be # dims + 1
+kNNdistplot(xform[, .(x, y)], mp) # identifies knee at y ~ 0.4 for eps value
+```
+
+```{r}
+xform[, dclust := dbscan(cbind(x, y), 0.4, mp)$cluster]
+xform[dclust == 0, dclust := NA]
+setkey(xform, sample)
+vertex.attributes(graf)$dclust <- num_2_fac(xform[V(graf)$name, dclust])
+lo <- create_layout(graf, "manual", node.positions = xform[, .(x, y)])
+plot_paths_with_var("dclust", lo) 
+```
+
 ### Tree
 
 All together.
 Again separation is mostly diarrhea/recovery.
 However, some diarrhea points are closer to recovery points than they are to the majority of diarrhea points.
 This can also be seen in the last plot where the two 'clouds' enmesh.
-```{r,fig.width=7,fig.height=7}
+```{r,fig.width=7,fig.height=7,include=FALSE,eval=FALSE}
 dm <- dcast(gordon.jsds, sample.i ~ sample.j, value.var = "distance")
 rn <- dm[, sample.i] 
 dm <- as.matrix(dm[, -1])
@@ -208,7 +224,7 @@ ggraph(lo) +
   theme(aspect.ratio = 1)
 ```
 
-```{r gordon-state-clusters,fig.width=7,fig.height=10}
+```{r gordon-state-clusters,fig.width=7,fig.height=10,include=FALSE,eval=FALSE}
 setkey(gordon.jsds, subject.i, subject.j)
 gordon.samples[, hour := as.character(hour)]
 setkey(gordon.samples, subject, hour)
