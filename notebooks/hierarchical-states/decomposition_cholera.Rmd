@@ -182,10 +182,16 @@ kNNdistplot(xform[, .(x, y)], mp) # identifies knee at y ~ 0.4 for eps value
 ```
 
 ```{r}
+dst <- dist(dm)
+res <- dbscan(dst, 0.4, 3)
+# names(res$cluster) <- attr(dst, "Labels")
+# setkey(xform, sample)
+# xform[, dclust := res$cluster[sample]]
+xform[, c("subject", "state", "hour") := tstrsplit(sample, "_")]
 xform[, dclust := dbscan(cbind(x, y), 0.4, mp)$cluster]
 xform[dclust == 0, dclust := NA]
 setkey(xform, sample)
-vertex.attributes(graf)$dclust <- num_2_fac(xform[V(graf)$name, dclust])
+vertex.attributes(graf)$dclust <- as.character(xform[V(graf)$name, dclust])
 lo <- create_layout(graf, "manual", node.positions = xform[, .(x, y)])
 plot_paths_with_var("dclust", lo) 
 ```
