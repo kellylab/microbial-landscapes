@@ -261,8 +261,8 @@ grafs <- lapply(sites, function(si, grafs, mods) {
 },
 grafs = grafs, mods = modules)
 ```
-```{r,fig.asp=1.8}
-plot_grid(plotlist = lapply(sites, function(si, grafs, xform) {
+```{r,fig.asp=1}
+pl <- lapply(sites, function(si, grafs, xform) {
   g <- grafs[[si]]
   xf <- xform[si,  .(sample, x, y)]
   ggraph(g, "manual", node.positions = xf) +
@@ -274,8 +274,11 @@ plot_grid(plotlist = lapply(sites, function(si, grafs, xform) {
     theme_graph(base_family = "Helvetica") +
     theme(aspect.ratio = 1) 
 },
-grafs = grafs, xform = xform),
-nrow = 2)
+grafs = grafs, xform = xform)
+pl[[1]]
+ggsave("figs/bats_louvain.pdf")
+pl[[2]]
+ggsave("figs/hot_louvain.pdf")
 ```
 
 ### Density
@@ -384,3 +387,9 @@ plot_grid(plotlist = lapply(sites, function(si, jsd) {
 }, jsd = jsds),
 nrow = 2)
 ```
+
+## Density clustering
+```{r}
+library(dbscan)
+```
+

@@ -57,13 +57,15 @@ event.lims[, event := factor(levels = c("travel", "diarrhea 1", "diarrhea 2",
                                         "Salmonella"), event)]
 david.jsds[subject.i == subject.j & day.delta == 1] %>% 
   setnames("subject.i", "subject") %>% 
-  ggplot(aes(x = day.i, y = jsd)) +
+  ggplot(aes(x = day.i, y = distance)) +
   geom_rect(data = event.lims, 
     mapping = aes(fill = event, xmin = start, xmax = end, 
-                  ymin = 0.1, ymax = 1.05
+                  ymin = 0, ymax = 1.05
                   ), inherit.aes = FALSE, alpha = 0.5) +
   geom_point() +
+  labs(x = "day") +
   facet_wrap(~ subject, nrow = 2)
+ggsave("figs/david_jsd_time.pdf")
 ```
 
 Distributions of all distances for all time scales.
@@ -77,6 +79,7 @@ dens <- p0 + stat_density(aes(fill = subject.i), alpha = 0.5,
                           position = "identity")  +
   labs(fill = "subject")
 plot_grid(cdf, dens, nrow = 2, align = "hv")
+ggsave("figs/david_dist_distrib.pdf")
 ```
 
 ## Paths
@@ -143,6 +146,7 @@ plot_grid(plotlist = lapply(c("day", "event"), function(var, lo) {
   p
 }, lo = lo),
 nrow = 2, align = "v")
+ggsave("figs/david_mds.pdf")
 ```
 
 Major separation is between subjects.
@@ -232,7 +236,8 @@ vertex.attributes(graf)$dclust <- num_2_fac(xform[V(graf)$name, dclust])
 
 ```{r}
 lo <- create_layout(graf, "manual", node.positions = xform[, .(x, y)])
-plot_paths_with_var("dclust", lo) 
+plot_paths_with_var("dclust", lo) + labs(color = "cluster") 
+ggsave("figs/david_density_clusters.pdf")
 ```
 ```{r}
 setkey(david.samples, sample)
@@ -243,7 +248,9 @@ david.samples[xform[, .(sample, dclust)]] %>%
   geom_point(aes(color = event), size = 0.5) +
   scale_color_brewer(palette = "Dark2") +
   theme(panel.grid.major.y = element_line(color = "grey80")) +
+  labs(y = "cluster") +
   facet_wrap(~ subject, nrow = 2, scales = "free_y")
+ggsave("figs/david_density_clusters_time.pdf")
 ```
 ### Transitions
 ```{r}
