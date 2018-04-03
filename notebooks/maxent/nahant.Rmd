@@ -26,16 +26,19 @@ dt[, c("kingdom", "phylum", "class", "order", "family", "genus", "species") :=
 ```{r}
 phyla <- dt[!is.na(phylum), .(abundance = sum(abundance)), 
             by = .(kingdom, phylum, day)]
+phyla[, log.abund := log10(abundance), by = day]
+mla <- phyla[!is.infinite(log.abund), min(log.abund)]
+phyla[log.abund == -Inf, log.abund := mla]
 ```
 
 Pairwise correlation between all phyla:
 ```{r,fig.asp=1}
 n.days <- uniqueN(phyla$day)
 corr <- phyla %>% 
-  dcast(day ~ phylum, value.var = "abundance") %>% 
+  dcast(day ~ phylum, value.var = "log.abund") %>% 
   as.data.frame %>% 
   df_2_mat %>% 
-  cor %>% 
+  cor(method = "pearson") %>% 
   mat_2_df(row.names = "phylum.i") %>% 
   as.data.table %>% 
   melt(id.vars = "phylum.i", variable.name = "phylum.j", value.name = "correlation")
@@ -47,6 +50,7 @@ ggplot(corr, aes(x = phylum.i, y = phylum.j)) +
   scale_fill_gradient2() +
   theme(aspect.ratio = 1, 
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+ggsave("figs/nahant_correlation.pdf")
 ```
 
 Inverting the correlation matrix gives the putative pairwise interaction matrix between phyla, vis-a-vis [Lezon *et al.*, *PNAS* 2006](http://www.pnas.org/content/103/50/19033.short).
@@ -69,7 +73,7 @@ ggplot(ntraxn, aes(x = phylum.i, y = phylum.j)) +
   scale_y_discrete(limits = br) +
   theme(aspect.ratio = 1,
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-  
+ ggsave("figs/nahant_coupling.pdf") 
 ```
 
 Most interactions are positive.

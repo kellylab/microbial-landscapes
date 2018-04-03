@@ -198,8 +198,8 @@ grafs <- lapply(c(bats = "bats", hot = "hot"),
 },
 coords = mds.out, jsds = jsds, xf = xform)
 ```
-```{r,fig.asp=1.8}
-plot_grid(plotlist = lapply(sites, function(si, graf, coord, mbreaks) {
+```{r,fig.asp=1}
+pl <- lapply(sites, function(si, graf, coord, mbreaks) {
   gf <- graf[[si]]
   pts <- coord[si, .(sample, x, y)]
   ggraph(gf, "manual", node.positions = pts) +
@@ -219,8 +219,11 @@ plot_grid(plotlist = lapply(sites, function(si, graf, coord, mbreaks) {
 graf = grafs, 
 coord = xform, 
 mbreaks = c(1, 3, 6, 9, 12) # Jan, plus months of solstices + equinoxes
-),
-ncol = 1)
+)
+pl[[1]]
+ggsave("figs/prochloro_bats_calmonth.pdf")
+pl[[2]]
+ggsave("figs/prochloro_hot_calmonth.pdf")
 ```
 
 
@@ -371,6 +374,7 @@ plot_grid(plotlist = lapply(sites, function(si, xform) {
     facet_wrap(~ depth, nrow = 3)
 }, xform = xform),
 nrow = 2)
+ggsave("figs/prochloro_state_prob.pdf")
 ```
 
 ```{r,fig.asp=1}
@@ -386,6 +390,7 @@ plot_grid(plotlist = lapply(sites, function(si, jsd) {
     facet_wrap(~ depth.i, nrow = 3)
 }, jsd = jsds),
 nrow = 2)
+ggsave("figs/prochloro_transition_prob.pdf")
 ```
 
 ## Density clustering
