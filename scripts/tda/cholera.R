@@ -20,37 +20,6 @@ rownames(jsd) <- sample.names
 colnames(jsd) <- sample.names
 js.dist <- sqrt(jsd)
 
-# density estimator on a grid method
-# mds
-#n <- length(rn)
-#k <- 2
-#x <- cmdscale(js.dist, k = k, eig = TRUE)
-#print("MDS goodness of fit:")
-#print(x$GOF)
-#mds <- x$points
-#ngrid <- 100
-#grid <- expand.grid(
-#  as.data.frame(
-#  apply(mds, 2, function(v) seq(min(v), max(v), length.out = ngrid)
-#)))
-
-# create filtration -------------------------------------------------------
-
-#maxscale <- max(js.dist)
-#print(paste("Maxscale = max distance =" , maxscale))
-#
-#rips <- ripsFiltration(js.dist, maxdimension = 0, maxscale = maxscale,
-#  dist = "arbitrary", library = "Dionysus")
-
-# pdf("figs/cholera_persistence_diag.pdf")
-# plot(rips$diagram, main = "Diagram")
-# plot(rips$diagram, barcode = TRUE, main = "Barcode")
-# cdf <- ecdf(rips$diagram[, 3])
-# plot(cdf, main = "b0")
-# bzero <- function(x) (1 - cdf(x)) * nrow(rips$diagram)
-# plot(bzero, main = "# components", log = "y")
-# dev.off()
-
 # tdamapper method --------------------------------------------------------
 
 # filter: mean distance to k nearest pts
@@ -58,15 +27,31 @@ k.nearest <- function(v, k) {
   v <- sort(v[v > 0])
   mean(v[1:k])
 }
-f1 <- apply(js.dist, 1, k.nearest, k = 10)
-setkey(gordon, sample)
-f2 <- gordon[sample.names, unique(hour)]
-mpr <- mapper1D(js.dist, filter_values = f1, num_intervals = 100, percent_overlap = 90)
-#mpr <- mapper2D(js.dist, filter_values = list(f1, f2))
+filter.position.knn <- function(dst, k) {
+  f1 <- apply(dst, 1, k.nearest, k = k) # filtering by local density
+  mds1 <- cmdscale(js.dist, 1) # filtering by 'position'
+  f2 <- mds1[, 1]
+  list(f1, f2)
+}
+filter.position2D <- function(dst) {
+  # filtering by position only
+  mds2 <- cmdscale(dst, 2)
+  list(mds2[, 1], mds2[, 2])
+}
+# ftr <- filter.position2D(js.dist)
+ftr <- filter.position.knn(js.dist, 10)
+mpr <- mapper2D(js.dist, filter_values = ftr, percent_overlap = 50,
+                num_intervals = c(5, 5))
+
+# characterize mapper vertices --------------------------------------------
+
+
 library(igraph)
 library(ggraph)
 g1 <- graph.adjacency(mpr$adjacency, mode="undirected")
+# size
 V(g1)$size <- sapply(mpr$points_in_vertex, length)
+# fraction diarrhea
 fstate <- function(v, dt) {
   setkey(dt, sample)
   snames <- names(v)
@@ -74,12 +59,33 @@ fstate <- function(v, dt) {
   sum(s == "diarrhea") / length(s)
 }
 V(g1)$fd <- sapply(mpr$points_in_vertex, fstate, dt = gordon)
-#plot(g1, layout=layout.auto(g1))
+# density
+vert.knn <- function(ps, js.dist, k) {
+  knn <- sapply(ps, function(p, js.dist, k) {
+    v <- js.dist[p,]
+    k.nearest(v, k)
+  }, js.dist = js.dist, k = k)
+  mean(knn)
+}
+V(g1)$mean.knn <- sapply(mpr$points_in_vertex, vert.knn, js.dist = js.dist,
+                         k = 10)
+# time
+V(g1)$mean.t <- sapply(mpr$points_in_vertex, function(p, dt) {
+  setkey(dt, sample)
+  snames <- names(p)
+  dt[snames, mean(hour)]
+}, dt = gordon)
+
+
+# draw graphs -------------------------------------------------------------
+
+
 kk.fr <- function(graf) {
   l1 <- create_layout(graf, layout = "igraph", algorithm = "kk")
-  l2 <- create_layout(graf, layout = "igraph", algorithm = "fr",
+  l1 <- create_layout(graf, layout = "igraph", algorithm = "fr",
+                      niter = 1000,
                       coords = as.matrix(l1[, c("x", "y")]))
-  l2
+  l1
 }
 lo <- kk.fr(g1)
 ggraph(lo) +
@@ -88,5 +94,20 @@ ggraph(lo) +
   labs(size = "# samples", color = "f diarrhea") +
   theme(aspect.ratio = 1) +
   scale_color_distiller(palette = "Spectral") +
-  # scale_size_continuous(range = c(0.1, 1)) +
+  theme_graph(base_family = "Helvetica")
+# color vertices by mean knn density
+ggraph(lo) +
+  geom_edge_link() +
+  geom_node_point(aes(size = size, color = mean.knn)) +
+  labs(size = "# samples") +
+  theme(aspect.ratio = 1) +
+  scale_color_distiller(palette = "Blues") +
+  theme_graph(base_family = "Helvetica")
+
+ggraph(lo) +
+  geom_edge_link() +
+  geom_node_point(aes(size = size, color = mean.t)) +
+  labs(size = "# samples") +
+  theme(aspect.ratio = 1) +
+  scale_color_distiller(palette = "Spectral") +
   theme_graph(base_family = "Helvetica")
