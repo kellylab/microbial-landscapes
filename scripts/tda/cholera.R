@@ -1,6 +1,7 @@
 library(data.table)
 library(TDA)
 library(philentropy)
+library(cowplot)
 
 util.dir <- "../r/"
 
@@ -60,12 +61,12 @@ fstate <- function(v, dt) {
 }
 V(g1)$fd <- sapply(mpr$points_in_vertex, fstate, dt = gordon)
 # density
-vert.knn <- function(ps, js.dist, k) {
+vert.knn <- function(ps, js.dist, k, agg = "mean") {
   knn <- sapply(ps, function(p, js.dist, k) {
     v <- js.dist[p,]
     k.nearest(v, k)
   }, js.dist = js.dist, k = k)
-  mean(knn)
+  do.call(agg, list(x = knn))
 }
 V(g1)$mean.knn <- sapply(mpr$points_in_vertex, vert.knn, js.dist = js.dist,
                          k = 10)
@@ -107,6 +108,34 @@ ggraph(lo) +
 ggraph(lo) +
   geom_edge_link() +
   geom_node_point(aes(size = size, color = mean.t)) +
+  labs(size = "# samples") +
+  theme(aspect.ratio = 1) +
+  scale_color_distiller(palette = "Spectral") +
+  theme_graph(base_family = "Helvetica")
+
+
+# ‘meta’ persistent homology ----------------------------------------------
+
+ls <- seq(min(V(g1)$mean.knn), max(V(g1)$mean.knn), length.out = 1000)
+ls.gs <- lapply(ls, function(x, g) induced_subgraph(g, V(g)$mean.knn <= x),
+                g = g1)
+ncomps <- sapply(ls.gs, function(g) components(g)$no)
+ggplot(data.frame(pi = ls, b0 = ncomps), aes(x = pi, y = b0)) +
+  geom_line()
+rep.vs <- which(V(g1)$mean.knn <= max(ls[ncomps == max(ncomps)]))
+# rep.vs <- which(V(g1)$mean.knn <= ls[60])
+rep.xy <- lo[rep.vs, c("x", "y")]
+rep.g <- induced_subgraph(g1, rep.vs)
+ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
+  geom_edge_link() +
+  geom_node_point(aes(size = size, color = mean.knn)) +
+  labs(size = "# samples") +
+  theme(aspect.ratio = 1) +
+  scale_color_distiller(palette = "Blues") +
+  theme_graph(base_family = "Helvetica")
+ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
+  geom_edge_link() +
+  geom_node_point(aes(size = size, color = fd)) +
   labs(size = "# samples") +
   theme(aspect.ratio = 1) +
   scale_color_distiller(palette = "Spectral") +
