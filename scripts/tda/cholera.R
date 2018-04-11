@@ -1,5 +1,5 @@
 library(data.table)
-library(TDA)
+library(TDAmapper)
 library(philentropy)
 library(cowplot)
 
@@ -113,22 +113,64 @@ ggraph(lo) +
   scale_color_distiller(palette = "Spectral") +
   theme_graph(base_family = "Helvetica")
 
+# subject trajectories ----------------------------------------------------
+vtxmap <- lapply(mpr$points_in_vertex, function(v) {
+  data.table(sample = names(v))
+})
+vtxmap <- rbindlist(vtxmap, idcol = "vertex")
+V(g1)$x <- lo[V(g1), "x"]
+V(g1)$y <- lo[V(g1), "y"]
+sample.spx <- lapply(sample.names, function(s, vtxmap, g) {
+  setkey(vtxmap, sample)
+  vs <- vtxmap[s, vertex]
+  if (length(vs) == 1) {
+    if (is.na(vs)) {
+      NA
+    } else {
+      induced_subgraph(g, vs)
+    }
+  } else{
+    induced_subgraph(g, vs)
+  }
+}, vtxmap = vtxmap, g = g1)
+names(sample.spx) <- sample.names
+sample.spx <- sample.spx[!is.na(sample.spx)]
+graph.2.df <- function(g) {
+  data.frame(x = V(g)$x, y = V(g)$y, size = V(g)$size)
+}
+sample.overlays <- lapply(sample.spx, function(sg, lo) {
+  df <- graph.2.df(sg)
+  ggraph(lo) +
+    geom_edge_link0() +
+    geom_node_point(aes(size = size), color = "grey50") +
+    theme_graph(base_family = "Helvetica") +
+    geom_point(aes(x = x, y = y, size = size),
+               data = graph.2.df(sg),
+               color = "red")
+}, lo)
+for (s in names(sample.overlays)) {
+  ggsave(paste0("subject-trajectories/", s, ".pdf"),
+         sample.overlays[[s]])
+}
+
 
 # ‘meta’ persistent homology ----------------------------------------------
 
-ls <- seq(min(V(g1)$mean.knn), max(V(g1)$mean.knn), length.out = 1000)
-ls.gs <- lapply(ls, function(x, g) induced_subgraph(g, V(g)$mean.knn <= x),
+V(g1)$max.knn <- sapply(mpr$points_in_vertex, vert.knn, js.dist = js.dist,
+                        k = 10, agg = "max")
+ls <- seq(min(V(g1)$max.knn), max(V(g1)$max.knn), length.out = 1000)
+ls.gs <- lapply(ls, function(x, g) induced_subgraph(g, V(g)$max.knn <= x),
                 g = g1)
 ncomps <- sapply(ls.gs, function(g) components(g)$no)
 ggplot(data.frame(pi = ls, b0 = ncomps), aes(x = pi, y = b0)) +
   geom_line()
-rep.vs <- which(V(g1)$mean.knn <= max(ls[ncomps == max(ncomps)]))
+rep.vs <- which(V(g1)$max.knn <= max(ls[ncomps == max(ncomps)]))
 # rep.vs <- which(V(g1)$mean.knn <= ls[60])
 rep.xy <- lo[rep.vs, c("x", "y")]
 rep.g <- induced_subgraph(g1, rep.vs)
 ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
   geom_edge_link() +
-  geom_node_point(aes(size = size, color = mean.knn)) +
+  geom_node_point(aes(size = size, color = max.knn)) +
   labs(size = "# samples") +
   theme(aspect.ratio = 1) +
   scale_color_distiller(palette = "Blues") +
