@@ -19,4 +19,4 @@ gordon[, hour := {
   }, di.max = di.max)
 }, by = subject]
 
-gordon[, sample := paste(subject, state, hour, sep = "_")]
+gordon[, sample := paste(subject, state, id, sep = "_")]

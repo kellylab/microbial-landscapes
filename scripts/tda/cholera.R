@@ -138,19 +138,27 @@ sample.spx <- sample.spx[!is.na(sample.spx)]
 graph.2.df <- function(g) {
   data.frame(x = V(g)$x, y = V(g)$y, size = V(g)$size)
 }
-sample.overlays <- lapply(sample.spx, function(sg, lo) {
+sample.overlays <- lapply(names(sample.spx), function(name, ss, lo) {
+  sg <- sample.spx[[name]]
+  if (grepl("diarrhea", name)) {
+    clr <- "red"
+  } else {
+    clr <- "blue"
+  }
   df <- graph.2.df(sg)
   ggraph(lo) +
     geom_edge_link0() +
     geom_node_point(aes(size = size), color = "grey50") +
     theme_graph(base_family = "Helvetica") +
+    labs(title = name) +
     geom_point(aes(x = x, y = y, size = size),
                data = graph.2.df(sg),
-               color = "red")
-}, lo)
+               color = clr)
+}, ss = sample.spx, lo = lo)
+names(sample.overlays) <- names(sample.spx)
 for (s in names(sample.overlays)) {
-  ggsave(paste0("subject-trajectories/", s, ".pdf"),
-         sample.overlays[[s]])
+  ggsave(paste0("subject-trajectories/", s, ".png"),
+         sample.overlays[[s]], scale = 0.5)
 }
 
 
