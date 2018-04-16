@@ -157,7 +157,7 @@ sample.overlays <- lapply(names(sample.spx), function(name, ss, lo) {
 }, ss = sample.spx, lo = lo)
 names(sample.overlays) <- names(sample.spx)
 for (s in names(sample.overlays)) {
-  ggsave(paste0("subject-trajectories/", s, ".png"),
+  ggsave(paste0("subject-trajectories/frames", s, ".png"),
          sample.overlays[[s]], scale = 0.5)
 }
 
@@ -166,14 +166,18 @@ for (s in names(sample.overlays)) {
 
 V(g1)$max.knn <- sapply(mpr$points_in_vertex, vert.knn, js.dist = js.dist,
                         k = 10, agg = "max")
-ls <- seq(min(V(g1)$max.knn), max(V(g1)$max.knn), length.out = 1000)
+ls <- sort(unique(V(g1)$max.knn))
 ls.gs <- lapply(ls, function(x, g) induced_subgraph(g, V(g)$max.knn <= x),
                 g = g1)
-ncomps <- sapply(ls.gs, function(g) components(g)$no)
+comps <- lapply(ls.gs, components)
+ncomps <- sapply(comps, function(g) g$no)
 ggplot(data.frame(pi = ls, b0 = ncomps), aes(x = pi, y = b0)) +
-  geom_line()
+  geom_line() +
+  geom_point()
+
+#' Getting the representative level set as the one with most components.
+#' Get the vertices in that level set:
 rep.vs <- which(V(g1)$max.knn <= max(ls[ncomps == max(ncomps)]))
-# rep.vs <- which(V(g1)$mean.knn <= ls[60])
 rep.xy <- lo[rep.vs, c("x", "y")]
 rep.g <- induced_subgraph(g1, rep.vs)
 ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
@@ -190,3 +194,4 @@ ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
   theme(aspect.ratio = 1) +
   scale_color_distiller(palette = "Spectral") +
   theme_graph(base_family = "Helvetica")
+
