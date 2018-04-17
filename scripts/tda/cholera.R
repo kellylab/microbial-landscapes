@@ -2,6 +2,7 @@ library(data.table)
 library(TDAmapper)
 library(philentropy)
 library(cowplot)
+library(tidyr)
 
 util.dir <- "../r/"
 
@@ -46,41 +47,36 @@ mpr <- mapper2D(js.dist, filter_values = ftr, percent_overlap = 50,
 
 # characterize mapper vertices --------------------------------------------
 
-
 library(igraph)
 library(ggraph)
 g1 <- graph.adjacency(mpr$adjacency, mode="undirected")
 # size
 V(g1)$size <- sapply(mpr$points_in_vertex, length)
 # fraction diarrhea
-fstate <- function(v, dt) {
-  setkey(dt, sample)
-  snames <- names(v)
-  s <- dt[snames, state]
-  sum(s == "diarrhea") / length(s)
+source("named.vector.R")
+sample.states <- unique(gordon[, .(sample, state)])
+sample.states <- named.vector(sample.states$state, sample.states$sample)
+fstate <- function(x) {
+  sum(x == "diarrhea") / length(x)
 }
-V(g1)$fd <- sapply(mpr$points_in_vertex, fstate, dt = gordon)
+V(g1)$fd <- sapply(mpr$points_in_vertex, vertex.attribute,
+                   point.attributes = sample.states, summ = "fstate")
 # density
-vert.knn <- function(ps, js.dist, k, agg = "mean") {
-  knn <- sapply(ps, function(p, js.dist, k) {
-    v <- js.dist[p,]
-    k.nearest(v, k)
-  }, js.dist = js.dist, k = k)
-  do.call(agg, list(x = knn))
-}
-V(g1)$mean.knn <- sapply(mpr$points_in_vertex, vert.knn, js.dist = js.dist,
-                         k = 10)
+source("k.first.R")
+k <- 10
+kNN <- apply(js.dist, 1, k.first, k = k)
+source("vertex.attribute.R")
+V(g1)$mean.knn <- sapply(mpr$points_in_vertex, vertex.attribute,
+                         point.attributes = kNN)
 # time
-V(g1)$mean.t <- sapply(mpr$points_in_vertex, function(p, dt) {
-  setkey(dt, sample)
-  snames <- names(p)
-  dt[snames, mean(hour)]
-}, dt = gordon)
-
+sample.times <- unique(gordon[, .(sample, hour)])
+sample.times <- named.vector(sample.times$hour, sample.times$sample)
+V(g1)$mean.t <- sapply(mpr$points_in_vertex, vertex.attribute,
+                       point.attributes = sample.times)
 
 # draw graphs -------------------------------------------------------------
 
-
+set.seed(1)
 kk.fr <- function(graf) {
   l1 <- create_layout(graf, layout = "igraph", algorithm = "kk")
   l1 <- create_layout(graf, layout = "igraph", algorithm = "fr",
@@ -164,8 +160,8 @@ for (s in names(sample.overlays)) {
 
 # ‘meta’ persistent homology ----------------------------------------------
 
-V(g1)$max.knn <- sapply(mpr$points_in_vertex, vert.knn, js.dist = js.dist,
-                        k = 10, agg = "max")
+V(g1)$max.knn <- sapply(mpr$points_in_vertex, vertex.attribute,
+                        point.attributes = kNN, summ = "max")
 ls <- sort(unique(V(g1)$max.knn))
 ls.gs <- lapply(ls, function(x, g) induced_subgraph(g, V(g)$max.knn <= x),
                 g = g1)
@@ -177,9 +173,11 @@ ggplot(data.frame(pi = ls, b0 = ncomps), aes(x = pi, y = b0)) +
 
 #' Getting the representative level set as the one with most components.
 #' Get the vertices in that level set:
-rep.vs <- which(V(g1)$max.knn <= max(ls[ncomps == max(ncomps)]))
+sel <- max(which(ncomps == max(ncomps))) # level set index
+rep.vs <- which(V(g1)$max.knn <= ls[sel])
 rep.xy <- lo[rep.vs, c("x", "y")]
 rep.g <- induced_subgraph(g1, rep.vs)
+V(rep.g)$state <- as.character(comps[[sel]]$membership)
 ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
   geom_edge_link() +
   geom_node_point(aes(size = size, color = max.knn)) +
@@ -194,4 +192,23 @@ ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
   theme(aspect.ratio = 1) +
   scale_color_distiller(palette = "Spectral") +
   theme_graph(base_family = "Helvetica")
+ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
+  geom_edge_link() +
+  geom_node_point(aes(size = size, color = state)) +
+  labs(size = "# samples") +
+  theme(aspect.ratio = 1) +
+  theme_graph(base_family = "Helvetica")
 
+#' Characterize each of the components in the representative level set.
+state.knns <- sapply(unique(V(rep.g)$state), function(si, graph, fn = "max") {
+  sg <- induced_subgraph(graph, V(graph)$state == si)
+  knn <- V(sg)$max.knn
+  c(max = max(knn), min = min(knn))
+}, graph = rep.g)
+state.knns <- as.data.frame(t(state.knns))
+state.knns$state <- factor(seq(nrow(state.knns)),
+                           levels = as.character(seq(nrow(state.knns))))
+ggplot(state.knns, aes(x = min, y = state)) +
+  geom_segment(aes(group = state, xend = max, yend = state)) +
+  geom_point(data = function(dt) dplyr::filter(dt, max == min)) +
+  labs(x = "max kNN", color = "persistence")
