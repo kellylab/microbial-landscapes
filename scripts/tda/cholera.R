@@ -42,8 +42,13 @@ filter.position2D <- function(dst) {
 }
 # ftr <- filter.position2D(js.dist)
 ftr <- filter.position.knn(js.dist, 10)
-mpr <- mapper2D(js.dist, filter_values = ftr, percent_overlap = 50,
-                num_intervals = c(5, 5))
+po <- 50
+ni <- c(5, 5)
+mpr <- mapper2D(js.dist, filter_values = ftr, percent_overlap = po,
+                num_intervals = ni)
+# fix the adjacency matrix
+source("mapper.adj.R")
+mpr$adjacency <- mapper.adj(mpr$points_in_vertex)
 
 # characterize mapper vertices --------------------------------------------
 
@@ -85,29 +90,18 @@ kk.fr <- function(graf) {
   l1
 }
 lo <- kk.fr(g1)
-ggraph(lo) +
-  geom_edge_link() +
-  geom_node_point(aes(size = size, color = fd)) +
-  labs(size = "# samples", color = "f diarrhea") +
-  theme(aspect.ratio = 1) +
-  scale_color_distiller(palette = "Spectral") +
-  theme_graph(base_family = "Helvetica")
+source("plot.mapper.R")
+# color by fraction samples marked diarrhea
+plot.mapper(lo, aes_(size = ~size, color = ~fd),
+            list(size = "# samples", color = "f diarrhea")) +
+  scale_color_distiller(palette = "Spectral")
 # color vertices by mean knn density
-ggraph(lo) +
-  geom_edge_link() +
-  geom_node_point(aes(size = size, color = mean.knn)) +
-  labs(size = "# samples") +
-  theme(aspect.ratio = 1) +
-  scale_color_distiller(palette = "Blues") +
-  theme_graph(base_family = "Helvetica")
-
-ggraph(lo) +
-  geom_edge_link() +
-  geom_node_point(aes(size = size, color = mean.t)) +
-  labs(size = "# samples") +
-  theme(aspect.ratio = 1) +
-  scale_color_distiller(palette = "Spectral") +
-  theme_graph(base_family = "Helvetica")
+plot.mapper(lo, aes_(size = ~size, color = ~mean.knn),
+            list(size = "# samples")) +
+  scale_color_distiller(palette = "Blues")
+# color by mean time in estimated hours
+plot.mapper(lo, aes_(size = ~size, color = ~mean.t), list(size = "samples")) +
+  scale_color_distiller(palette = "Spectral")
 
 # subject trajectories ----------------------------------------------------
 vtxmap <- lapply(mpr$points_in_vertex, function(v) {
@@ -142,19 +136,14 @@ sample.overlays <- lapply(names(sample.spx), function(name, ss, lo) {
     clr <- "blue"
   }
   df <- graph.2.df(sg)
-  ggraph(lo) +
-    geom_edge_link0() +
-    geom_node_point(aes(size = size), color = "grey50") +
-    theme_graph(base_family = "Helvetica") +
-    labs(title = name) +
-    geom_point(aes(x = x, y = y, size = size),
-               data = graph.2.df(sg),
+  plot.mapper(lo, aes_(size = ~size), list(title = name), color = "grey50") +
+    geom_point(aes(x = x, y = y, size = size), data = graph.2.df(sg),
                color = clr)
 }, ss = sample.spx, lo = lo)
 names(sample.overlays) <- names(sample.spx)
 for (s in names(sample.overlays)) {
-  ggsave(paste0("subject-trajectories/frames", s, ".png"),
-         sample.overlays[[s]], scale = 0.5)
+  save_plot(paste0("subject-trajectories/frames/", s, ".png"),
+            sample.overlays[[s]])
 }
 
 
@@ -178,26 +167,15 @@ rep.vs <- which(V(g1)$max.knn <= ls[sel])
 rep.xy <- lo[rep.vs, c("x", "y")]
 rep.g <- induced_subgraph(g1, rep.vs)
 V(rep.g)$state <- as.character(comps[[sel]]$membership)
-ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
-  geom_edge_link() +
-  geom_node_point(aes(size = size, color = max.knn)) +
-  labs(size = "# samples") +
-  theme(aspect.ratio = 1) +
-  scale_color_distiller(palette = "Blues") +
-  theme_graph(base_family = "Helvetica")
-ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
-  geom_edge_link() +
-  geom_node_point(aes(size = size, color = fd)) +
-  labs(size = "# samples") +
-  theme(aspect.ratio = 1) +
-  scale_color_distiller(palette = "Spectral") +
-  theme_graph(base_family = "Helvetica")
-ggraph(rep.g, layout = "manual", node.positions = rep.xy) +
-  geom_edge_link() +
-  geom_node_point(aes(size = size, color = state)) +
-  labs(size = "# samples") +
-  theme(aspect.ratio = 1) +
-  theme_graph(base_family = "Helvetica")
+rep.lo <- create_layout(rep.g, "manual", node.positions = rep.xy)
+plot.mapper(rep.lo, aes_(size = ~size, color = ~max.knn),
+            list(size = "# samples")) +
+  scale_color_distiller(palette = "Blues")
+plot.mapper(rep.lo, aes_(size = ~size, color = ~fd),
+            list(size = "# samples")) +
+  scale_color_distiller(palette = "Spectral")
+plot.mapper(rep.lo, aes_(size = ~size, color = ~state),
+            list(size = "# samples"))
 
 #' Characterize each of the components in the representative level set.
 state.knns <- sapply(unique(V(rep.g)$state), function(si, graph, fn = "max") {
