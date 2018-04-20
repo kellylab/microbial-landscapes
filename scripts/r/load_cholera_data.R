@@ -4,10 +4,10 @@ data.dir <- "../../data/"
 gordon <- fread(paste0(data.dir, "cholera/gordon.otus"),
                 col.names = c("sample", "otu", "count"))
 # extract sample info
-gordon[, c("subject", "state", "id") := tstrsplit(sample, "_")]
+gordon[, c("subject", "diagnosis", "id") := tstrsplit(sample, "_")]
 # mark 'end' time as last diarrhea pt + 1hr
 gordon[, hour := {
-  di.max <- max(as.numeric(id[state == "diarrhea" & id != "end"]))
+  di.max <- max(as.numeric(id[diagnosis == "diarrhea" & id != "end"]))
   t <- sapply(id, function(id, di.max) {
     if (id == "end") {
       di.max + 1
@@ -19,4 +19,4 @@ gordon[, hour := {
   }, di.max = di.max)
 }, by = subject]
 
-gordon[, sample := paste(subject, state, id, sep = "_")]
+gordon[, sample := paste(subject, diagnosis, id, sep = "_")]

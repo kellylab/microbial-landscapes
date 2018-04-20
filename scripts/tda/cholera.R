@@ -11,6 +11,8 @@ source(paste0(util.dir, "load_cholera_data.R"))
 # load data ---------------------------------------------------------------
 
 gordon[, freq := count / sum(count), by = sample]
+gordon.samples <- unique(gordon[, .(sample, subject, diagnosis, id, hour)])
+gordon.samples[, idx := frank(hour), by = subject]
 distribs <- dcast(gordon, sample ~ otu, value.var = "freq", fill = 0)
 sample.names <- distribs$sample
 distribs <- as.matrix(distribs[, -1])
@@ -24,13 +26,9 @@ js.dist <- sqrt(jsd)
 
 # tdamapper method --------------------------------------------------------
 
-# filter: mean distance to k nearest pts
-k.nearest <- function(v, k) {
-  v <- sort(v[v > 0])
-  mean(v[1:k])
-}
+source("k.first.R")
 filter.position.knn <- function(dst, k) {
-  f1 <- apply(dst, 1, k.nearest, k = k) # filtering by local density
+  f1 <- apply(dst, 1, k.first, k = k) # filtering by local density
   mds1 <- cmdscale(js.dist, 1) # filtering by 'position'
   f2 <- mds1[, 1]
   list(f1, f2)
@@ -55,27 +53,27 @@ mpr$adjacency <- mapper.adj(mpr$points_in_vertex)
 library(igraph)
 library(ggraph)
 g1 <- graph.adjacency(mpr$adjacency, mode="undirected")
+# name vertices so can track to subgraphs later
+V(g1)$name <- paste0("v", seq_along(V(g1)))
 # size
 V(g1)$size <- sapply(mpr$points_in_vertex, length)
 # fraction diarrhea
 source("named.vector.R")
-sample.states <- unique(gordon[, .(sample, state)])
-sample.states <- named.vector(sample.states$state, sample.states$sample)
+sample.diagnosis <- named.vector(gordon.samples$diagnosis,
+                                 gordon.samples$sample)
 fstate <- function(x) {
   sum(x == "diarrhea") / length(x)
 }
+source("vertex.attribute.R")
 V(g1)$fd <- sapply(mpr$points_in_vertex, vertex.attribute,
-                   point.attributes = sample.states, summ = "fstate")
+                   point.attributes = sample.diagnosis, summ = "fstate")
 # density
-source("k.first.R")
 k <- 10
 kNN <- apply(js.dist, 1, k.first, k = k)
-source("vertex.attribute.R")
 V(g1)$mean.knn <- sapply(mpr$points_in_vertex, vertex.attribute,
                          point.attributes = kNN)
 # time
-sample.times <- unique(gordon[, .(sample, hour)])
-sample.times <- named.vector(sample.times$hour, sample.times$sample)
+sample.times <- named.vector(gordon.samples$hour, gordon.samples$sample)
 V(g1)$mean.t <- sapply(mpr$points_in_vertex, vertex.attribute,
                        point.attributes = sample.times)
 
@@ -104,30 +102,16 @@ plot.mapper(lo, aes_(size = ~size, color = ~mean.t), list(size = "samples")) +
   scale_color_distiller(palette = "Spectral")
 
 # subject trajectories ----------------------------------------------------
-vtxmap <- lapply(mpr$points_in_vertex, function(v) {
-  data.table(sample = names(v))
-})
-vtxmap <- rbindlist(vtxmap, idcol = "vertex")
+source("vertex.2.points.R")
+vtxmap <- vertex.2.points(mpr$points_in_vertex)
+setnames(vtxmap, "point.name", "sample")
 V(g1)$x <- lo[V(g1), "x"]
 V(g1)$y <- lo[V(g1), "y"]
-sample.spx <- lapply(sample.names, function(s, vtxmap, g) {
-  setkey(vtxmap, sample)
-  vs <- vtxmap[s, vertex]
-  if (length(vs) == 1) {
-    if (is.na(vs)) {
-      NA
-    } else {
-      induced_subgraph(g, vs)
-    }
-  } else{
-    induced_subgraph(g, vs)
-  }
-}, vtxmap = vtxmap, g = g1)
-names(sample.spx) <- sample.names
+# produce a subgraph for every sample
+source("sample.subgraphs.R")
+sample.spx <- sample.subgraphs(
+  vtxmap[, .(samples = sample, vertices = vertex)], g1)
 sample.spx <- sample.spx[!is.na(sample.spx)]
-graph.2.df <- function(g) {
-  data.frame(x = V(g)$x, y = V(g)$y, size = V(g)$size)
-}
 sample.overlays <- lapply(names(sample.spx), function(name, ss, lo) {
   sg <- sample.spx[[name]]
   if (grepl("diarrhea", name)) {
@@ -135,17 +119,15 @@ sample.overlays <- lapply(names(sample.spx), function(name, ss, lo) {
   } else {
     clr <- "blue"
   }
-  df <- graph.2.df(sg)
   plot.mapper(lo, aes_(size = ~size), list(title = name), color = "grey50") +
-    geom_point(aes(x = x, y = y, size = size), data = graph.2.df(sg),
-               color = clr)
+    geom_point(aes(x = x, y = y, size = size),
+               data = as.data.frame(vertex_attr(sg)), color = clr)
 }, ss = sample.spx, lo = lo)
 names(sample.overlays) <- names(sample.spx)
 for (s in names(sample.overlays)) {
   save_plot(paste0("subject-trajectories/frames/", s, ".png"),
             sample.overlays[[s]])
 }
-
 
 # ‘meta’ persistent homology ----------------------------------------------
 
@@ -157,8 +139,7 @@ ls.gs <- lapply(ls, function(x, g) induced_subgraph(g, V(g)$max.knn <= x),
 comps <- lapply(ls.gs, components)
 ncomps <- sapply(comps, function(g) g$no)
 ggplot(data.frame(pi = ls, b0 = ncomps), aes(x = pi, y = b0)) +
-  geom_line() +
-  geom_point()
+  geom_line() + geom_point()
 
 #' Getting the representative level set as the one with most components.
 #' Get the vertices in that level set:
@@ -183,10 +164,38 @@ state.knns <- sapply(unique(V(rep.g)$state), function(si, graph, fn = "max") {
   knn <- V(sg)$max.knn
   c(max = max(knn), min = min(knn))
 }, graph = rep.g)
-state.knns <- as.data.frame(t(state.knns))
+state.knns <- as.data.table(t(state.knns))
 state.knns$state <- factor(seq(nrow(state.knns)),
                            levels = as.character(seq(nrow(state.knns))))
 ggplot(state.knns, aes(x = min, y = state)) +
   geom_segment(aes(group = state, xend = max, yend = state)) +
   geom_point(data = function(dt) dplyr::filter(dt, max == min)) +
   labs(x = "max kNN", color = "persistence")
+
+#' Subject time points characterized by state(s)
+state.knns$persistence <- state.knns$max - state.knns$min
+state.knns[, rank := frank(-persistence)]
+
+#' Get the vertices associated with the top 3 states
+stable.vertices <- lapply(state.knns[rank <= 3, state], function(st, rg) {
+  data.table(state = st, vertex = V(rg)$name[V(rg)$state == st])
+}, rg = rep.g)
+stable.vertices <- rbindlist(stable.vertices)
+setkey(gordon.samples, sample)
+setkey(vtxmap, sample)
+vtxmap <- vtxmap[gordon.samples]
+setkey(stable.vertices, vertex)
+setkey(vtxmap, vertex.name)
+vtxmap <- stable.vertices[vtxmap]
+ggplot(vtxmap, aes(x = idx, y = state)) +
+  geom_point(aes(color = diagnosis)) +
+  theme(panel.grid.major.y = element_line(size = 0.1, color = "grey50")) +
+  facet_wrap(~ subject, scales = "free_x")
+
+#' Just the diarrhea samples, since the time scale changes in recovery
+setkey(vtxmap, diagnosis)
+ggplot(vtxmap["diarrhea"], aes(x = hour, y = state)) +
+  geom_point() +
+  theme(panel.grid.major.y = element_line(size = 0.1, color = "grey50")) +
+  labs(title = "diarrhea") +
+  facet_wrap(~ subject)
