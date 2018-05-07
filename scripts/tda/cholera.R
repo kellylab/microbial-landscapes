@@ -40,8 +40,8 @@ filter.position2D <- function(dst) {
   mds2 <- cmdscale(dst, 2)
   list(mds2[, 1], mds2[, 2])
 }
-# ftr <- filter.position2D(js.dist)
-ftr <- filter.position.knn(js.dist, 10)
+ftr <- filter.position2D(js.dist)
+# ftr <- filter.position.knn(js.dist, 10)
 po <- 50
 ni <- c(5, 5)
 mpr <- mapper2D(js.dist, filter_values = ftr, percent_overlap = po,
@@ -64,6 +64,7 @@ sample.states <- named.vector(sample.states$state, sample.states$sample)
 fstate <- function(x) {
   sum(x == "diarrhea") / length(x)
 }
+source("vertex.attribute.R")
 V(g1)$fd <- sapply(mpr$points_in_vertex, vertex.attribute,
                    point.attributes = sample.states, summ = "fstate")
 # density
