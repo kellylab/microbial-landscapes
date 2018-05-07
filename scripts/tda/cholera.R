@@ -40,8 +40,8 @@ filter.position2D <- function(dst) {
 }
 ftr <- filter.position2D(js.dist)
 # ftr <- filter.position.knn(js.dist, 10)
-po <- 50
-ni <- c(5, 5)
+po <- 80
+ni <- c(10, 10)
 mpr <- mapper2D(js.dist, filter_values = ftr, percent_overlap = po,
                 num_intervals = ni)
 # fix the adjacency matrix
@@ -87,7 +87,8 @@ kk.fr <- function(graf) {
                       coords = as.matrix(l1[, c("x", "y")]))
   l1
 }
-lo <- kk.fr(g1)
+# lo <- kk.fr(g1)
+lo <- create_layout(g1, layout = "igraph", algorithm = "fr", niter = 1000)
 source("plot.mapper.R")
 # color by fraction samples marked diarrhea
 plot.mapper(lo, aes_(size = ~size, color = ~fd),
@@ -96,10 +97,10 @@ plot.mapper(lo, aes_(size = ~size, color = ~fd),
 # color vertices by mean knn density
 plot.mapper(lo, aes_(size = ~size, color = ~mean.knn),
             list(size = "# samples")) +
-  scale_color_distiller(palette = "Blues")
+  scale_color_distiller(palette = "Spectral", direction = 1)
 # color by mean time in estimated hours
 plot.mapper(lo, aes_(size = ~size, color = ~mean.t), list(size = "samples")) +
-  scale_color_distiller(palette = "Spectral")
+  scale_color_distiller(palette = "Spectral", direction = 1)
 
 # subject trajectories ----------------------------------------------------
 source("vertex.2.points.R")
@@ -131,71 +132,44 @@ for (s in names(sample.overlays)) {
 
 # ‘meta’ persistent homology ----------------------------------------------
 
-V(g1)$max.knn <- sapply(mpr$points_in_vertex, vertex.attribute,
-                        point.attributes = kNN, summ = "max")
-ls <- sort(unique(V(g1)$max.knn))
-ls.gs <- lapply(ls, function(x, g) induced_subgraph(g, V(g)$max.knn <= x),
+V(g1)$mean.knn <- sapply(mpr$points_in_vertex, vertex.attribute,
+                        point.attributes = kNN, summ = "mean")
+ls <- sort(unique(V(g1)$mean.knn))
+ls.gs <- lapply(ls, function(x, g) induced_subgraph(g, V(g)$mean.knn <= x),
                 g = g1)
 comps <- lapply(ls.gs, components)
+# ncomps <- sapply(comps, function(g) sum(g$csize > 1)) # filter singletons
 ncomps <- sapply(comps, function(g) g$no)
-ggplot(data.frame(pi = ls, b0 = ncomps), aes(x = pi, y = b0)) +
+ggplot(data.frame(threshold = ls, b0 = ncomps), aes(x = threshold, y = b0)) +
   geom_line() + geom_point()
 
-#' Getting the representative level set as the one with most components.
+#' Get the longest interval in density threshold where b0 is constant.
+#' First get the number of intervals in the threshold for each run where b0 is
+#' constant:
+b0.runs <- rle(ncomps)
+b0.runs <- data.table(length = b0.runs$lengths, b0 = b0.runs$values)
+#' Cumulatively sum over intervals in the threshold value to get the end
+#' threshold value of each run:
+b0.runs[, end := sapply(cumsum(length), function(n, th) {
+  th[n]
+}, th = ls)]
+#' Shift the end values down and prepend 0 for the start threshold value of
+#' each run:
+b0.runs[, start := c(0, end[-.N])]
+#' Get persistence length of each run in the dimension of the threshold.
+b0.runs[, persistence := end - start]
+#' Get rid of the run between 0 and the first point.
+b0.runs <- b0.runs[-1,]
+#' Find the threshold at the end of the run with maximum persistence
+thc <- b0.runs[b0 > 1, end[persistence == max(persistence)]]
+
 #' Get the vertices in that level set:
-sel <- max(which(ncomps == max(ncomps))) # level set index
-rep.vs <- which(V(g1)$max.knn <= ls[sel])
+rep.vs <- which(V(g1)$mean.knn <= thc)
 rep.xy <- lo[rep.vs, c("x", "y")]
 rep.g <- induced_subgraph(g1, rep.vs)
-V(rep.g)$state <- as.character(comps[[sel]]$membership)
+V(rep.g)$state <- as.character(comps[[which(ls == thc)]]$membership)
 rep.lo <- create_layout(rep.g, "manual", node.positions = rep.xy)
-plot.mapper(rep.lo, aes_(size = ~size, color = ~max.knn),
-            list(size = "# samples")) +
-  scale_color_distiller(palette = "Blues")
-plot.mapper(rep.lo, aes_(size = ~size, color = ~fd),
-            list(size = "# samples")) +
-  scale_color_distiller(palette = "Spectral")
-plot.mapper(rep.lo, aes_(size = ~size, color = ~state),
-            list(size = "# samples"))
-
-#' Characterize each of the components in the representative level set.
-state.knns <- sapply(unique(V(rep.g)$state), function(si, graph, fn = "max") {
-  sg <- induced_subgraph(graph, V(graph)$state == si)
-  knn <- V(sg)$max.knn
-  c(max = max(knn), min = min(knn))
-}, graph = rep.g)
-state.knns <- as.data.table(t(state.knns))
-state.knns$state <- factor(seq(nrow(state.knns)),
-                           levels = as.character(seq(nrow(state.knns))))
-ggplot(state.knns, aes(x = min, y = state)) +
-  geom_segment(aes(group = state, xend = max, yend = state)) +
-  geom_point(data = function(dt) dplyr::filter(dt, max == min)) +
-  labs(x = "max kNN", color = "persistence")
-
-#' Subject time points characterized by state(s)
-state.knns$persistence <- state.knns$max - state.knns$min
-state.knns[, rank := frank(-persistence)]
-
-#' Get the vertices associated with the top 3 states
-stable.vertices <- lapply(state.knns[rank <= 3, state], function(st, rg) {
-  data.table(state = st, vertex = V(rg)$name[V(rg)$state == st])
-}, rg = rep.g)
-stable.vertices <- rbindlist(stable.vertices)
-setkey(gordon.samples, sample)
-setkey(vtxmap, sample)
-vtxmap <- vtxmap[gordon.samples]
-setkey(stable.vertices, vertex)
-setkey(vtxmap, vertex.name)
-vtxmap <- stable.vertices[vtxmap]
-ggplot(vtxmap, aes(x = idx, y = state)) +
-  geom_point(aes(color = diagnosis)) +
-  theme(panel.grid.major.y = element_line(size = 0.1, color = "grey50")) +
-  facet_wrap(~ subject, scales = "free_x")
-
-#' Just the diarrhea samples, since the time scale changes in recovery
-setkey(vtxmap, diagnosis)
-ggplot(vtxmap["diarrhea"], aes(x = hour, y = state)) +
-  geom_point() +
-  theme(panel.grid.major.y = element_line(size = 0.1, color = "grey50")) +
-  labs(title = "diarrhea") +
-  facet_wrap(~ subject)
+plot.mapper(rep.lo, aes_(size = ~size, color = ~state), list(size = "samples"))
+# plot.mapper(lo, aes_(size = ~size), list(size = "samples"), color = "grey50") +
+#   geom_point(data = rep.lo,
+#              aes_(x = ~x, y = ~y, size = ~size, color = ~state))
