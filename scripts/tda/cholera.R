@@ -27,12 +27,12 @@ js.dist <- sqrt(jsd)
 # tdamapper method --------------------------------------------------------
 
 source("k.first.R")
-filter.position.knn <- function(dst, k) {
-  f1 <- apply(dst, 1, k.first, k = k) # filtering by local density
-  mds1 <- cmdscale(js.dist, 1) # filtering by 'position'
-  f2 <- mds1[, 1]
-  list(f1, f2)
-}
+# filter.position.knn <- function(dst, k) {
+#   f1 <- apply(dst, 1, k.first, k = k) # filtering by local density
+#   mds1 <- cmdscale(js.dist, 1) # filtering by 'position'
+#   f2 <- mds1[, 1]
+#   list(f1, f2)
+# }
 filter.position2D <- function(dst) {
   # filtering by position only
   mds2 <- cmdscale(dst, 2)
@@ -80,13 +80,13 @@ V(g1)$mean.t <- sapply(mpr$points_in_vertex, vertex.attribute,
 # draw graphs -------------------------------------------------------------
 
 set.seed(1)
-kk.fr <- function(graf) {
-  l1 <- create_layout(graf, layout = "igraph", algorithm = "kk")
-  l1 <- create_layout(graf, layout = "igraph", algorithm = "fr",
-                      niter = 1000,
-                      coords = as.matrix(l1[, c("x", "y")]))
-  l1
-}
+# kk.fr <- function(graf) {
+#   l1 <- create_layout(graf, layout = "igraph", algorithm = "kk")
+#   l1 <- create_layout(graf, layout = "igraph", algorithm = "fr",
+#                       niter = 1000,
+#                       coords = as.matrix(l1[, c("x", "y")]))
+#   l1
+# }
 # lo <- kk.fr(g1)
 lo <- create_layout(g1, layout = "igraph", algorithm = "fr", niter = 1000)
 source("plot.mapper.R")
@@ -130,7 +130,9 @@ for (s in names(sample.overlays)) {
             sample.overlays[[s]])
 }
 
-# ‘meta’ persistent homology ----------------------------------------------
+#' # 'Meta' persistent homology on the Mapper graph
+#' ## b0 vs density threshold
+# b0 vs density threshold ----------------------------------------------
 
 V(g1)$mean.knn <- sapply(mpr$points_in_vertex, vertex.attribute,
                         point.attributes = kNN, summ = "mean")
@@ -170,6 +172,28 @@ rep.g <- induced_subgraph(g1, rep.vs)
 V(rep.g)$state <- as.character(comps[[which(ls == thc)]]$membership)
 rep.lo <- create_layout(rep.g, "manual", node.positions = rep.xy)
 plot.mapper(rep.lo, aes_(size = ~size, color = ~state), list(size = "samples"))
-# plot.mapper(lo, aes_(size = ~size), list(size = "samples"), color = "grey50") +
-#   geom_point(data = rep.lo,
-#              aes_(x = ~x, y = ~y, size = ~size, color = ~state))
+
+#' ## Video of graph expansion as vertices are added from least to most dense
+# global density level set video frames -----------------------------------
+lvlset.grafs <- lapply(ls, function(th, graf, layout) {
+  vids <- which(V(graf)$mean.knn <= th)
+  sg <- induced_subgraph(graf, vids)
+  xl <- c(min(V(graf)$x) - 1, max(V(graf)$x) + 1)
+  yl <- c(min(V(graf)$y) - 1, max(V(graf)$y) + 1)
+  cl <- sapply(c("min", "max"), function(fn, x) {
+    do.call(fn, list(x= x))
+    }, x = V(graf)$mean.knn)
+  ggraph(sg, "manual", node.positions = data.frame(x = V(sg)$x, y = V(sg)$y)) +
+    geom_edge_link0() +
+    geom_node_point(aes(color = mean.knn, size = size)) +
+    coord_cartesian(xlim = xl, ylim = yl) +
+    scale_color_gradient2(midpoint = median(V(graf)$mean.knn),
+                          high = "blue", mid = "yellow", low = "red",
+                          limits = cl) +
+    theme_graph()
+}, graf = g1, layout = lo)
+for (i in seq_along(ls)) {
+  fn <- paste0("level-set/frames/", i, ".png")
+  save_plot(fn, lvlset.grafs[[i]])
+}
+
