@@ -160,6 +160,7 @@ sample.sgrafs <- sample.subgraphs(
 # setkey(v2p, subject, day)
 # setkey(events, subject, day)
 # v2p <- events[v2p]
+setkey(samples, subject)
 b.events <- samples["B", .(sample, event)]
 sample.overlays <- mapply(function(s, sg, e, lo) {
   if (!is.null(sg)) {
