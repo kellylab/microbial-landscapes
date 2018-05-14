@@ -22,25 +22,86 @@ sample.names <- dist.mat$sample.x
 dist.mat <- as.matrix(dist.mat[, -1])
 rownames(dist.mat) <- sample.names
 
-#' # Preview of data using 2D MDS
+# calculate k nearest neighbors
+source("dist2knn.R")
+k <- 10
+kNN <- dist2knn(dist.mat, k)
+samples[, kNN := kNN[sample]]
+
+# event metadata
+setkey(samples, subject)
+events <- mapply(function(start, end, subject, event) {
+  x <- data.table(day = seq(start, end, by = 1), subject = subject,
+                  event = event)
+  x
+}, start = c(0, 71, 80, 104, 123, 0, 151, 160 ),
+end = c(70, 122, 85, 113, samples["A", max(day)],
+          150, 159, samples["B", max(day)]),
+subject = c("A", "A", "A", "A", "A",
+            "B", "B", "B"),
+event = c("US (pre)", "travel", "diarrhea 1", "diarrhea 2", "US (post)",
+          "pre-Salmonella", "Salmonella", "post-Salmonella"),
+SIMPLIFY = FALSE) %>% rbindlist(use.names = TRUE)
+# collapse event labels per day
+events <- events[, .(event = paste(event, collapse = " + ")),
+                 by = .(subject, day)]
+samples <- merge(samples, events, by = c("subject", "day"))
+
+#' # Data preview
+#' ## Subjects traverse low density regions of state space near events
+ggplot(samples, aes(x = day, y = kNN)) +
+  geom_point(aes(color = event)) +
+  stat_smooth(span = 0.25) +
+  scale_y_log10() +
+  facet_wrap(~ subject, ncol = 1)
+
+#' ## MDS
 #'
 #' 2D MDS shows much more variance in dimension 1 than dimension 2, resulting in
 #' large empty spaces.
+
+
+# mds ------------------------------------------------------------------
+
+
 mds2d <- as.data.table(cmdscale(dist.mat, 2), keep.rownames = "sample")
 setnames(mds2d, c("V1", "V2"), c("mds1", "mds2"))
 mds2d[, subject := tstrsplit(sample, "_")[[1]]]
 ggplot(mds2d, aes(x = mds1, y = mds2)) +
   geom_point(aes(color = subject))
 
+#' With log kNN density we can spread out a bit.
+
+mds1d <- cmdscale(dist.mat, 1)
+samples[, mds1 := mds1d[sample,1]]
+ggplot(samples, aes(x = mds1, y = kNN)) +
+  geom_point(aes(color = subject)) +
+  scale_y_log10()
+
 #' # Mapper
 #' ## Filter by 2D MDS
+
 # mds filter -------------------------------------------------------------
+
+
 mpr <- mapper1D(dist.mat, cmdscale(dist.mat, 1), num_intervals = 100,
                 percent_overlap = 80)
 mpr$points_in_vertex <- lapply(mpr$points_in_vertex, function(v, rn) {
   names(v) <- rn[v]
   v
 }, rn = rownames(dist.mat))
+
+# mds + kNN ---------------------------------------------------------------
+
+
+mpr <- mapper2D(dist.mat, list(samples$mds1, log10(samples$kNN)),
+                num_intervals = c(100, 3), percent_overlap = 80)
+mpr$points_in_vertex <- lapply(mpr$points_in_vertex, function(v, rn) {
+  names(v) <- rn[v]
+  v
+}, rn = rownames(dist.mat))
+
+
 
 # mapper output ----------------------------------------------------
 
@@ -74,6 +135,19 @@ plot.mapper(lo, aes_(size = ~size, color = ~subject),
             list(color = "fraction A")) +
   scale_color_gradient2(midpoint = 0.5, mid = "yellow")
 
+#' ### Density
+setkey(samples, sample)
+V(graf)$mean.kNN <- sapply(V(graf)$name, function(v, dt) {
+  setkey(dt, vertex.name)
+  dt[v, mean(kNN)]
+}, dt = v2p)
+plot.mapper(create_layout(graf, "manual",
+                          node.positions = data.frame(x = V(graf)$x,
+                                                      y = V(graf)$y)),
+            aes_(size = ~size, color = ~mean.kNN)) +
+  scale_color_distiller(palette = "Spectral", trans = "log10")
+
+
 #' ### Eric's trip
 #'
 # eric’s frames -----------------------------------------------------------
@@ -83,30 +157,10 @@ source("sample.subgraphs.R")
 sample.sgrafs <- sample.subgraphs(
   v2p[, .(samples = point.name, vertices = vertex)],
   graf)
-# eventmetadata
-setkey(samples, subject)
-events <- mapply(function(start, end, subject, event) {
-  x <- data.table(day = seq(start, end, by = 1), subject = subject,
-                  event = event)
-  x
-}, start = c(0, 71, 80, 104, 123, 0, 151, 160 ),
-end = c(70, 122, 85, 113, samples["A", max(day)],
-          150, 159, samples["B", max(day)]),
-subject = c("A", "A", "A", "A", "A",
-            "B", "B", "B"),
-event = c("US (pre)", "travel", "diarrhea 1", "diarrhea 2", "US (post)",
-          "pre-Salmonella", "Salmonella", "post-Salmonella"),
-SIMPLIFY = FALSE) %>% rbindlist(use.names = TRUE)
-# collapse event labels per day
-events <- events[, .(event = paste(event, collapse = " + ")),
-                 by = .(subject, day)]
-setkey(v2p, subject, day)
-setkey(events, subject, day)
-v2p <- events[v2p]
-b.samples <- samples["B", sample]
-setkey(samples, sample)
-# setkey(v2p, point.name)
-b.events <- events[samples[b.samples, .(subject, day)], event]
+# setkey(v2p, subject, day)
+# setkey(events, subject, day)
+# v2p <- events[v2p]
+b.events <- samples["B", .(sample, event)]
 sample.overlays <- mapply(function(s, sg, e, lo) {
   if (!is.null(sg)) {
     if (grepl("pre", e)) {
@@ -128,7 +182,8 @@ sample.overlays <- mapply(function(s, sg, e, lo) {
   } else {
     NULL
   }
-}, s = b.samples, sg = sample.sgrafs[b.samples], e = b.events,
+}, s = b.events$sample, sg = sample.sgrafs[b.events$sample],
+e = b.events$event,
 MoreArgs = list(lo = lo), SIMPLIFY = FALSE)
 setorder(samples, day)
 setkey(samples, subject)
@@ -139,18 +194,3 @@ for (i in seq_along(sample.overlays)) {
   so <- sample.overlays[[i]]
   save_plot(paste0("david-subject-trajectories/frames/B", i, ".png"), so)
 }
-#'
-#'
-#' source("vertex.attribute.R")
-#'
-#' subj.t <- function(vn, subj, v2p) {
-#'   setkey(v2p, vertex.name, subject)
-#'   v2p[.(vn, subj), mean(day)]
-#' }
-#' V(graf)$mean.tB <- sapply(V(graf)$name, subj.t, subj = "B", v2p = v2p)
-#' set.seed(0)
-#' lo <- create_layout(graf, "fr")
-#' plot.mapper(lo, aes_(color = ~mean.tB), list(color = "B's mean day")) +
-#'   scale_color_distiller(palette = "Spectral")
-#'
-#' #' ### Events
