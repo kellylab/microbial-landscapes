@@ -13,9 +13,11 @@
 #'
 #' @examples
 mapper.adj <- function(points.in.vertex) {
-  has.edge <- function(px, py) {
-    length(intersect(px, py)) > 0
+  nv <- length(points.in.vertex)
+  np <- max(sapply(points.in.vertex, max)) # max point id
+  vp <- matrix(0, nv, np)
+  for (vi in seq_len(nv)) {
+    vp[vi, points.in.vertex[[vi]]] <- 1
   }
-  has.edge <- Vectorize(has.edge)
-  outer(points.in.vertex, points.in.vertex, has.edge)
+  (vp %*% t(vp)) > 0
 }

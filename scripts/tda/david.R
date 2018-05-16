@@ -78,36 +78,31 @@ ggplot(samples, aes(x = mds1, y = kNN)) +
   geom_point(aes(color = subject)) +
   scale_y_log10()
 
+#' Or with the time:
+samples[, scaled.time := day / max(day), by = subject]
+ggplot(samples, aes(x = mds1, y = scaled.time)) +
+  geom_point(aes(color = subject))
+
 #' # Mapper
 #' ## Filter by 2D MDS
 
 # mds filter -------------------------------------------------------------
 
 
-mpr <- mapper1D(dist.mat, cmdscale(dist.mat, 1), num_intervals = 100,
+mpr <- mapper2D(dist.mat, list(mds2d$mds1, mds2d$mds2),
+                num_intervals = c(100, 10),
                 percent_overlap = 80)
 mpr$points_in_vertex <- lapply(mpr$points_in_vertex, function(v, rn) {
   names(v) <- rn[v]
   v
 }, rn = rownames(dist.mat))
 
-# mds + kNN ---------------------------------------------------------------
-
-
-mpr <- mapper2D(dist.mat, list(samples$mds1, log10(samples$kNN)),
-                num_intervals = c(100, 3), percent_overlap = 80)
-mpr$points_in_vertex <- lapply(mpr$points_in_vertex, function(v, rn) {
-  names(v) <- rn[v]
-  v
-}, rn = rownames(dist.mat))
-
-
 
 # mapper output ----------------------------------------------------
 
 
-source("mapper.adj.R")
-mpr$adjacency <- mapper.adj(mpr$points_in_vertex) # correct adj matrix
+# source("mapper.adj.R")
+# mpr$adjacency <- mapper.adj(mpr$points_in_vertex) # correct adj matrix
 
 #' Format Mapper output:
 source("vertex.2.points.R")
@@ -191,7 +186,49 @@ setkey(samples, subject)
 sample.overlays <- sample.overlays[samples["B", sample]]
 sample.overlays <- sample.overlays[sapply(sample.overlays,
                                           function(x) !is.null(x))]
+
+# write -------------------------------------------------------------------
+
+
 for (i in seq_along(sample.overlays)) {
   so <- sample.overlays[[i]]
   save_plot(paste0("david-subject-trajectories/frames/B", i, ".png"), so)
+}
+
+#' # Meta persistent homology
+#' ## Density level set
+
+
+# density level set -------------------------------------------------------
+
+
+knn.lvls <- sort(unique(V(graf)$mean.kNN))
+lvl.grafs <- lapply(knn.lvls, function(lvl, g) {
+  induced_subgraph(g, V(g)$mean.kNN <= lvl)
+}, g = graf)
+b0 = sapply(lvl.grafs, function(sg) components(sg)$no)
+source("run.ends.R")
+runs <- run.ends(knn.lvls, b0)
+ggplot(runs, aes(x = start, xend = end, y = value, yend = value)) +
+  geom_segment() +
+  labs(x = "density cutoff", y = "b0")
+
+xl <- c(min(V(graf)$x) - 2, max(V(graf)$x) + 2)
+yl <- c(min(V(graf)$y) - 2, max(V(graf)$y) + 2)
+cl <- sapply(c("min", "max"), function(fn, x) {
+  do.call(fn, list(x= x))
+  }, x = V(graf)$mean.kNN)
+for (i in seq_along(knn.lvls)) {
+  sg <- lvl.grafs[[i]]
+  lo <- create_layout(sg, "manual",
+                      node.positions = data.frame(x = V(sg)$x,
+                                                  y = V(sg)$y))
+  ttl <- formatC(knn.lvls[[i]])
+  p <- plot.mapper(lo, aes_(size = ~size, color = ~mean.kNN),
+                   list(title = paste("mean kNN =", ttl))) +
+    coord_cartesian(xlim = xl, ylim = yl) +
+    scale_color_gradient2(midpoint = mean(V(graf)$mean.kNN),
+                          high = "blue", mid = "yellow", low = "red",
+                          limits = cl)
+  save_plot(paste0("david-level-set/frames/", i, ".png"), p)
 }
