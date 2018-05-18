@@ -142,6 +142,28 @@ plot.mapper(create_layout(graf, "manual",
             aes_(size = ~size, color = ~mean.kNN)) +
   scale_color_distiller(palette = "Spectral", trans = "log10")
 
+#' ### Events
+source(paste0(scripts.dir, "Mode.R"))
+subj.grafs <- lapply(c("A", "B"), function(subj, graf, v2p) {
+  setkey(v2p, subject)
+  g <- induced_subgraph(graf, v2p[subj, unique(vertex)])
+  setkey(v2p, vertex.name)
+  V(g)$event <- sapply(V(g)$name, function(v, subj, v2p) {
+    setkey(v2p, subject, vertex.name)
+    paste(Mode(v2p[.(subj, v), event]), collapse = "/")
+  }, subj = subj, v2p = v2p)
+  g
+}, graf = graf, v2p = v2p)
+subj.plots <- mapply(function(graf, subj) {
+  plot.mapper(create_layout(graf, "manual",
+                            node.positions = data.frame(x = V(graf)$x,
+                                                        y = V(graf)$y)),
+              aes_(size = ~size, color = ~event),
+              list(title = subj)) +
+    theme(aspect.ratio = 1)
+}, graf = subj.grafs, subj = c("A", "B"), SIMPLIFY = FALSE)
+plot_grid(plotlist = subj.plots)
+
 
 #' ### Eric's trip
 #'
