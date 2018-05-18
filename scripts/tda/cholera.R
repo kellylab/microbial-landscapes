@@ -27,28 +27,14 @@ js.dist <- sqrt(jsd)
 # tdamapper method --------------------------------------------------------
 
 source("k.first.R")
-# filter.position.knn <- function(dst, k) {
-#   f1 <- apply(dst, 1, k.first, k = k) # filtering by local density
-#   mds1 <- cmdscale(js.dist, 1) # filtering by 'position'
-#   f2 <- mds1[, 1]
-#   list(f1, f2)
-# }
-filter.position2D <- function(dst) {
-  # filtering by position only
-  mds2 <- cmdscale(dst, 2)
-  list(mds2[, 1], mds2[, 2])
-}
-ftr <- filter.position2D(js.dist)
-# ftr <- filter.position.knn(js.dist, 10)
-po <- 80
+mds2 <- cmdscale(js.dist, 2)
+po <- 70
 ni <- c(10, 10)
-mpr <- mapper2D(js.dist, filter_values = ftr, percent_overlap = po,
+mpr <- mapper2D(js.dist, filter_values = list(mds2[,1], mds2[,2]), 
+                percent_overlap = po,
                 num_intervals = ni)
-# fix the adjacency matrix
-source("mapper.adj.R")
-mpr$adjacency <- mapper.adj(mpr$points_in_vertex)
 
-# characterize mapper vertices --------------------------------------------
+# characterize mapper vertices 
 
 library(igraph)
 library(ggraph)
@@ -70,6 +56,15 @@ V(g1)$fd <- sapply(mpr$points_in_vertex, vertex.attribute,
 # density
 k <- 10
 kNN <- apply(js.dist, 1, k.first, k = k)
+
+# plot density
+gordon.samples[, knn := kNN[sample]]
+setkey(gordon.samples, diagnosis)
+ggplot(gordon.samples["diarrhea"], aes(x = hour, y = knn)) +
+  geom_point() +
+  facet_wrap(~ subject, ncol = 2) +
+  labs(y = "kNN", x = "hour", title = "diarrhea samples")
+
 V(g1)$mean.knn <- sapply(mpr$points_in_vertex, vertex.attribute,
                          point.attributes = kNN)
 # time
@@ -80,15 +75,15 @@ V(g1)$mean.t <- sapply(mpr$points_in_vertex, vertex.attribute,
 # draw graphs -------------------------------------------------------------
 
 set.seed(1)
-# kk.fr <- function(graf) {
-#   l1 <- create_layout(graf, layout = "igraph", algorithm = "kk")
-#   l1 <- create_layout(graf, layout = "igraph", algorithm = "fr",
-#                       niter = 1000,
-#                       coords = as.matrix(l1[, c("x", "y")]))
-#   l1
-# }
-# lo <- kk.fr(g1)
-lo <- create_layout(g1, layout = "igraph", algorithm = "fr", niter = 1000)
+kk.fr <- function(graf) {
+  l1 <- create_layout(graf, layout = "igraph", algorithm = "kk")
+  l1 <- create_layout(graf, layout = "igraph", algorithm = "fr",
+                      niter = 1000,
+                      coords = as.matrix(l1[, c("x", "y")]))
+  l1
+}
+lo <- kk.fr(g1)
+# lo <- create_layout(g1, layout = "igraph", algorithm = "fr", niter = 1000)
 source("plot.mapper.R")
 # color by fraction samples marked diarrhea
 plot.mapper(lo, aes_(size = ~size, color = ~fd),
@@ -96,7 +91,7 @@ plot.mapper(lo, aes_(size = ~size, color = ~fd),
   scale_color_distiller(palette = "Spectral")
 # color vertices by mean knn density
 plot.mapper(lo, aes_(size = ~size, color = ~mean.knn),
-            list(size = "# samples")) +
+            list(size = "# samples", color = "mean kNN")) +
   scale_color_distiller(palette = "Spectral", direction = 1)
 # color by mean time in estimated hours
 plot.mapper(lo, aes_(size = ~size, color = ~mean.t), list(size = "samples")) +
