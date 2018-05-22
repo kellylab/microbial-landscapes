@@ -19,10 +19,12 @@ distribs <- as.matrix(distribs[, -1])
 
 # compute js distance -----------------------------------------------------
 
-jsd <- JSD(distribs)
-rownames(jsd) <- sample.names
-colnames(jsd) <- sample.names
-js.dist <- sqrt(jsd)
+jsd <- fread("jsds/cholera.txt") # run make-jsds-cholera.R to precompute
+js.dist <- dcast(jsd, sample.x ~ sample.y, value.var = "jsd")
+rn <- js.dist$sample.x
+js.dist <- sqrt(as.matrix(js.dist[, -1]))
+rownames(js.dist) <- rn
+js.dist <- js.dist[sample.names, sample.names]
 
 # tdamapper method --------------------------------------------------------
 
@@ -30,11 +32,11 @@ source("k.first.R")
 mds2 <- cmdscale(js.dist, 2)
 po <- 70
 ni <- c(10, 10)
-mpr <- mapper2D(js.dist, filter_values = list(mds2[,1], mds2[,2]), 
+mpr <- mapper2D(js.dist, filter_values = list(mds2[,1], mds2[,2]),
                 percent_overlap = po,
                 num_intervals = ni)
 
-# characterize mapper vertices 
+# characterize mapper vertices
 
 library(igraph)
 library(ggraph)
