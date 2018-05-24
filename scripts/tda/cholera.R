@@ -28,7 +28,6 @@ js.dist <- js.dist[sample.names, sample.names]
 
 # tdamapper method --------------------------------------------------------
 
-source("k.first.R")
 mds2 <- cmdscale(js.dist, 2)
 po <- 70
 ni <- c(10, 10)
@@ -37,42 +36,37 @@ mpr <- mapper2D(js.dist, filter_values = list(mds2[,1], mds2[,2]),
                 num_intervals = ni)
 
 # characterize mapper vertices
-
-library(igraph)
-library(ggraph)
-g1 <- graph.adjacency(mpr$adjacency, mode="undirected")
-# name vertices so can track to subgraphs later
-V(g1)$name <- paste0("v", seq_along(V(g1)))
-# size
-V(g1)$size <- sapply(mpr$points_in_vertex, length)
-# fraction diarrhea
-source("named.vector.R")
-sample.diagnosis <- named.vector(gordon.samples$diagnosis,
-                                 gordon.samples$sample)
+vertices <- lapply(mpr$points_in_vertex, function(pts) {
+  data.table(sample = names(pts), sample.index = pts)
+})
+vertices <- rbindlist(vertices, idcol = "vertex")
+vertices[, name := paste0("v", vertex)] # for later record keeping
+source("k.first.R")
+k <- 10 # kNN density for each sample
+kNN <- apply(js.dist, 1, k.first, k = k)
+# plot density
+gordon.samples[, knn := kNN[sample]]
+v2s <- merge(vertices, gordon.samples, by = "sample")
 fstate <- function(x) {
   sum(x == "diarrhea") / length(x)
 }
-source("vertex.attribute.R")
-V(g1)$fd <- sapply(mpr$points_in_vertex, vertex.attribute,
-                   point.attributes = sample.diagnosis, summ = "fstate")
-# density
-k <- 10
-kNN <- apply(js.dist, 1, k.first, k = k)
-
-# plot density
-gordon.samples[, knn := kNN[sample]]
+vertices <- v2s[, .(fd = fstate(diagnosis),
+                    mean.t = mean(hour),
+                    mean.knn = mean(knn),
+                    size = .N),
+                    by = .(vertex, name)]
+library(igraph)
+library(ggraph)
+g1 <- graph.adjacency(mpr$adjacency, mode="undirected")
+setkey(vertices, vertex)
+for (att in c("name", "fd", "mean.t", "mean.knn", "size")) {
+  g1 <- set_vertex_attr(g1, att, V(g1), vertices[.(as.vector(V(g1)))][[(att)]])
+}
 setkey(gordon.samples, diagnosis)
 ggplot(gordon.samples["diarrhea"], aes(x = hour, y = knn)) +
   geom_point() +
   facet_wrap(~ subject, ncol = 2) +
   labs(y = "kNN", x = "hour", title = "diarrhea samples")
-
-V(g1)$mean.knn <- sapply(mpr$points_in_vertex, vertex.attribute,
-                         point.attributes = kNN)
-# time
-sample.times <- named.vector(gordon.samples$hour, gordon.samples$sample)
-V(g1)$mean.t <- sapply(mpr$points_in_vertex, vertex.attribute,
-                       point.attributes = sample.times)
 
 # draw graphs -------------------------------------------------------------
 
@@ -86,6 +80,8 @@ kk.fr <- function(graf) {
 }
 lo <- kk.fr(g1)
 # lo <- create_layout(g1, layout = "igraph", algorithm = "fr", niter = 1000)
+V(g1)$x <- lo[V(g1), "x"] # save layout coordinates for later
+V(g1)$y <- lo[V(g1), "y"]
 source("plot.mapper.R")
 # color by fraction samples marked diarrhea
 plot.mapper(lo, aes_(size = ~size, color = ~fd),
@@ -101,14 +97,12 @@ plot.mapper(lo, aes_(size = ~size, color = ~mean.t), list(size = "samples")) +
 
 # subject trajectories ----------------------------------------------------
 source("vertex.2.points.R")
-vtxmap <- vertex.2.points(mpr$points_in_vertex)
-setnames(vtxmap, "point.name", "sample")
-V(g1)$x <- lo[V(g1), "x"]
-V(g1)$y <- lo[V(g1), "y"]
+vertices <- vertex.2.points(mpr$points_in_vertex)
+setnames(vertices, "point.name", "sample")
 # produce a subgraph for every sample
 source("sample.subgraphs.R")
 sample.spx <- sample.subgraphs(
-  vtxmap[, .(samples = sample, vertices = vertex)], g1)
+  vertices[, .(samples = sample, vertices = vertex)], g1)
 sample.spx <- sample.spx[!is.na(sample.spx)]
 sample.overlays <- lapply(names(sample.spx), function(name, ss, lo) {
   sg <- sample.spx[[name]]
@@ -127,12 +121,43 @@ for (s in names(sample.overlays)) {
             sample.overlays[[s]])
 }
 
+# subject trace
+v2s[, c("x", "y") := lapply(c("x", "y"), function(att, graf, vs) {
+  a <- get.vertex.attribute(graf, att)
+  a[vs]
+}, graf = g1, vs = vertex)]
+sample.xy <- v2s[, lapply(list(x = x, y = y), mean),
+                 by = .(sample, sample.index, subject, diagnosis, id, hour,
+                        idx)]
+sample.xy <- split(sample.xy, by = "subject")
+straces <- mapply(function(dt, subj, lo) {
+  setorder(dt, idx)
+  n <- nrow(dt)
+  ends <- dt[c(1, n)]
+  dt <- data.frame(x = dt[-n, x], xend = dt[-1, x],
+                   y = dt[-n, y], yend = dt[-1, y],
+                   diagnosis = dt[-1, diagnosis])
+  ggraph(lo) +
+    geom_edge_link0(colour = "grey50") +
+    geom_node_point(aes(size = size), color = "grey50") +
+    theme(aspect.ratio = 1) +
+    theme_graph(base_family = "Helvetica") +
+    guides(size = FALSE) +
+    labs(title = subj) +
+    # geom_path(aes(x = x, y = y), dt) +
+    geom_point(aes(color = diagnosis, x = x, y = y), ends, size = 2) +
+    geom_segment(aes(x = x, y = y, xend = xend, yend = yend,
+                     color = diagnosis), dt,
+                 arrow = arrow(length = unit(5, "points"), type = "open"))
+}, dt = sample.xy, subj = names(sample.xy), MoreArgs = list(lo = lo),
+SIMPLIFY = FALSE)
+save_plot("subject-trajectories/all.pdf", plot_grid(plotlist = straces),
+          ncol = 3, base_height = 8, base_aspect_ratio = 0.5)
+
 #' # 'Meta' persistent homology on the Mapper graph
 #' ## b0 vs density threshold
 # b0 vs density threshold ----------------------------------------------
 
-V(g1)$mean.knn <- sapply(mpr$points_in_vertex, vertex.attribute,
-                        point.attributes = kNN, summ = "mean")
 ls <- sort(unique(V(g1)$mean.knn))
 ls.gs <- lapply(ls, function(x, g) induced_subgraph(g, V(g)$mean.knn <= x),
                 g = g1)
