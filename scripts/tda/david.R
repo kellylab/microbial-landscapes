@@ -75,8 +75,8 @@ ggplot(mds2d, aes(x = mds1, y = mds2)) +
 mds1d <- cmdscale(dist.mat, 1)
 samples[, mds1 := mds1d[sample,1]]
 ggplot(samples, aes(x = mds1, y = kNN)) +
-  geom_point(aes(color = subject)) +
-  scale_y_log10()
+  geom_point(aes(color = subject)) #+
+  # scale_y_log10()
 
 #' Or with the time:
 samples[, scaled.time := day / max(day), by = subject]
@@ -90,42 +90,49 @@ ggplot(samples, aes(x = mds1, y = scaled.time)) +
 
 
 mpr <- mapper2D(dist.mat, list(mds2d$mds1, mds2d$mds2),
-                num_intervals = c(100, 10),
+                num_intervals = c(90, 3),
                 percent_overlap = 80)
 mpr$points_in_vertex <- lapply(mpr$points_in_vertex, function(v, rn) {
   names(v) <- rn[v]
   v
 }, rn = rownames(dist.mat))
 
-
-# mapper output ----------------------------------------------------
-
-
-# source("mapper.adj.R")
-# mpr$adjacency <- mapper.adj(mpr$points_in_vertex) # correct adj matrix
-
 #' Format Mapper output:
-source("vertex.2.points.R")
-v2p <- vertex.2.points(mpr$points_in_vertex) # map vertices to samples
-v2p <- merge(v2p, samples, by.x = "point.name", by.y = "sample")
+vertices <- lapply(mpr$points_in_vertex, function(pts) {
+  data.table(sample = names(pts), sample.index = pts)
+})
+vertices <- rbindlist(vertices, idcol = "vertex")
+vertices[, name := paste0("v", vertex)] # for later record keeping
+v2p <- merge(vertices, samples, by = "sample")
+vertices <- v2p[, .(subject = sum(subject == "A") / .N,
+                    mean.knn = mean(kNN),
+                    size = .N),
+                    by = .(vertex, name)]
+
+# source("vertex.2.points.R")
 source("mapper.2.igraph.R")
 graf <- mapper.2.igraph(mpr)
-V(graf)$subject <- sapply(mpr$points_in_vertex, function(pts, dt) {
-  pnames <- names(pts)
-  setkey(dt, sample)
-  dt[pnames, sum(subject == "A") / .N]
-}, dt = samples)
-
+setkey(vertices, vertex)
+for (att in c("subject", "mean.knn", "size", "name")) {
+  graf <- set_vertex_attr(graf, att, V(graf), 
+                          vertices[as.vector(V(graf))][[att]])
+}
 
 #' ## Plots
 
 source("plot.mapper.R")
 #' Fraction of samples in each vertex belonging to each subject:
 set.seed(0)
-lo <- create_layout(graf, "fr")
+lo <- create_layout(graf, "kk")
+lo <- create_layout(graf, "fr", coords = as.matrix(lo[, c("x", "y")]), 
+                    niter = 1000)
 # store xy positions in graph for later
 V(graf)$x <- lo$x
 V(graf)$y <- lo$y
+v2p[, c("x", "y") := lapply(c("x", "y"), function(att, graf, vs) {
+  a <- get.vertex.attribute(graf, att)
+  a[vs]
+}, graf = graf, vs = vertex)]
 plot.mapper(lo, aes_(size = ~size, color = ~subject),
             list(color = "fraction A")) +
   scale_color_gradient2(midpoint = 0.5, mid = "yellow")
@@ -133,7 +140,7 @@ plot.mapper(lo, aes_(size = ~size, color = ~subject),
 #' ### Density
 setkey(samples, sample)
 V(graf)$mean.kNN <- sapply(V(graf)$name, function(v, dt) {
-  setkey(dt, vertex.name)
+  setkey(dt, name)
   dt[v, mean(kNN)]
 }, dt = v2p)
 plot.mapper(create_layout(graf, "manual",
@@ -142,27 +149,61 @@ plot.mapper(create_layout(graf, "manual",
             aes_(size = ~size, color = ~mean.kNN)) +
   scale_color_distiller(palette = "Spectral", trans = "log10")
 
+#' ### Subject traces
+
+# traces ------------------------------------------------------------------
+
+
+sample.xy <- v2p[, lapply(list(x = x, y = y), mean),
+                 by = .(sample, sample.index, subject, event, day)]
+sample.xy <- split(sample.xy, by = "subject")
+straces <- mapply(function(dt, subj, lo) {
+  setorder(dt, day)
+  n <- nrow(dt)
+  ends <- dt[c(1, n)]
+  dt <- data.frame(x = dt[-n, x], xend = dt[-1, x],
+                   y = dt[-n, y], yend = dt[-1, y],
+                   event = dt[-1, event])
+  ggraph(lo) +
+    geom_edge_link0(colour = "grey50") +
+    geom_node_point(aes(size = size), color = "grey50") +
+    theme(aspect.ratio = 1) +
+    theme_graph(base_family = "Helvetica") +
+    guides(size = FALSE) +
+    labs(title = subj) +
+    theme(legend.position = "bottom") +
+    guides(color = guide_legend(nrow = 2)) +
+    geom_point(aes(color = event, x = x, y = y), ends, size = 2) +
+    geom_segment(aes(x = x, y = y, xend = xend, yend = yend,
+                     color = event), dt,
+                 arrow = arrow(length = unit(5, "points"), type = "open"))
+}, dt = sample.xy, subj = names(sample.xy), MoreArgs = list(lo = lo),
+SIMPLIFY = FALSE)
+save_plot("david-subject-trajectories/david-traces.pdf", 
+          plot_grid(plotlist = straces), ncol = 2, 
+          base_aspect_ratio = 0.8, base_height = 5) 
+
 #' ### Events
-source(paste0(scripts.dir, "Mode.R"))
-subj.grafs <- lapply(c("A", "B"), function(subj, graf, v2p) {
-  setkey(v2p, subject)
-  g <- induced_subgraph(graf, v2p[subj, unique(vertex)])
-  setkey(v2p, vertex.name)
-  V(g)$event <- sapply(V(g)$name, function(v, subj, v2p) {
-    setkey(v2p, subject, vertex.name)
-    paste(Mode(v2p[.(subj, v), event]), collapse = "/")
-  }, subj = subj, v2p = v2p)
-  g
-}, graf = graf, v2p = v2p)
-subj.plots <- mapply(function(graf, subj) {
-  plot.mapper(create_layout(graf, "manual",
-                            node.positions = data.frame(x = V(graf)$x,
-                                                        y = V(graf)$y)),
-              aes_(size = ~size, color = ~event),
-              list(title = subj)) +
-    theme(aspect.ratio = 1)
-}, graf = subj.grafs, subj = c("A", "B"), SIMPLIFY = FALSE)
-plot_grid(plotlist = subj.plots)
+# source(paste0(scripts.dir, "Mode.R"))
+# subj.grafs <- lapply(c("A", "B"), function(subj, graf, v2p) {
+#   setkey(v2p, subject)
+#   g <- induced_subgraph(graf, v2p[subj, unique(vertex)])
+#   setkey(v2p, vertex.name)
+#   V(g)$event <- sapply(V(g)$name, function(v, subj, v2p) {
+#     setkey(v2p, subject, vertex.name)
+#     paste(Mode(v2p[.(subj, v), event]), collapse = "/")
+#   }, subj = subj, v2p = v2p)
+#   g
+# }, graf = graf, v2p = v2p)
+# subj.plots <- mapply(function(graf, subj) {
+#   plot.mapper(create_layout(graf, "manual",
+#                             node.positions = data.frame(x = V(graf)$x,
+#                                                         y = V(graf)$y)),
+#               aes_(size = ~size, color = ~event),
+#               list(title = subj)) +
+#     theme(aspect.ratio = 1)
+# }, graf = subj.grafs, subj = c("A", "B"), SIMPLIFY = FALSE)
+# plot_grid(plotlist = subj.plots)
 
 
 #' ### Eric's trip
