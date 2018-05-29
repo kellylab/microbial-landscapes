@@ -114,7 +114,7 @@ source("mapper.2.igraph.R")
 graf <- mapper.2.igraph(mpr)
 setkey(vertices, vertex)
 for (att in c("subject", "mean.knn", "size", "name")) {
-  graf <- set_vertex_attr(graf, att, V(graf), 
+  graf <- set_vertex_attr(graf, att, V(graf),
                           vertices[as.vector(V(graf))][[att]])
 }
 
@@ -124,7 +124,7 @@ source("plot.mapper.R")
 #' Fraction of samples in each vertex belonging to each subject:
 set.seed(0)
 lo <- create_layout(graf, "kk")
-lo <- create_layout(graf, "fr", coords = as.matrix(lo[, c("x", "y")]), 
+lo <- create_layout(graf, "fr", coords = as.matrix(lo[, c("x", "y")]),
                     niter = 1000)
 # store xy positions in graph for later
 V(graf)$x <- lo$x
@@ -179,31 +179,9 @@ straces <- mapply(function(dt, subj, lo) {
                  arrow = arrow(length = unit(5, "points"), type = "open"))
 }, dt = sample.xy, subj = names(sample.xy), MoreArgs = list(lo = lo),
 SIMPLIFY = FALSE)
-save_plot("david-subject-trajectories/david-traces.pdf", 
-          plot_grid(plotlist = straces), ncol = 2, 
-          base_aspect_ratio = 0.8, base_height = 5) 
-
-#' ### Events
-# source(paste0(scripts.dir, "Mode.R"))
-# subj.grafs <- lapply(c("A", "B"), function(subj, graf, v2p) {
-#   setkey(v2p, subject)
-#   g <- induced_subgraph(graf, v2p[subj, unique(vertex)])
-#   setkey(v2p, vertex.name)
-#   V(g)$event <- sapply(V(g)$name, function(v, subj, v2p) {
-#     setkey(v2p, subject, vertex.name)
-#     paste(Mode(v2p[.(subj, v), event]), collapse = "/")
-#   }, subj = subj, v2p = v2p)
-#   g
-# }, graf = graf, v2p = v2p)
-# subj.plots <- mapply(function(graf, subj) {
-#   plot.mapper(create_layout(graf, "manual",
-#                             node.positions = data.frame(x = V(graf)$x,
-#                                                         y = V(graf)$y)),
-#               aes_(size = ~size, color = ~event),
-#               list(title = subj)) +
-#     theme(aspect.ratio = 1)
-# }, graf = subj.grafs, subj = c("A", "B"), SIMPLIFY = FALSE)
-# plot_grid(plotlist = subj.plots)
+save_plot("david-subject-trajectories/david-traces.pdf",
+          plot_grid(plotlist = straces), ncol = 2,
+          base_aspect_ratio = 0.8, base_height = 5)
 
 
 #' ### Eric's trip
@@ -213,7 +191,7 @@ save_plot("david-subject-trajectories/david-traces.pdf",
 
 source("sample.subgraphs.R")
 sample.sgrafs <- sample.subgraphs(
-  v2p[, .(samples = point.name, vertices = vertex)],
+  v2p[, .(samples = sample, vertices = vertex)],
   graf)
 # setkey(v2p, subject, day)
 # setkey(events, subject, day)
@@ -249,9 +227,6 @@ setkey(samples, subject)
 sample.overlays <- sample.overlays[samples["B", sample]]
 sample.overlays <- sample.overlays[sapply(sample.overlays,
                                           function(x) !is.null(x))]
-
-# write -------------------------------------------------------------------
-
 
 for (i in seq_along(sample.overlays)) {
   so <- sample.overlays[[i]]
@@ -294,4 +269,39 @@ for (i in seq_along(knn.lvls)) {
                           high = "blue", mid = "yellow", low = "red",
                           limits = cl)
   save_plot(paste0("david-level-set/frames/", i, ".png"), p)
+}
+
+
+# density gradient level set ----------------------------------------------
+
+es <- data.table(vnames = attr(E(graf), "vnames"))
+es[, c("head", "tail") := tstrsplit(vnames, "\\|")]
+setkey(vertices, name)
+es[, delta.knn := vertices[tail, mean.knn] - vertices[head, mean.knn]]
+E(graf)$delta.knn <- es$delta.knn
+E(graf)$abs.delta <- abs(E(graf)$delta.knn)
+edge.lvls <- sort(unique(E(graf)$abs.delta))
+sgs <- lapply(edge.lvls[-1], function(th, graf) {
+  subgraph.edges(graf, which(E(graf)$abs.delta <= th), delete.vertices = TRUE)
+}, graf = simplify(graf, remove.multiple = TRUE, edge.attr.comb = "first"))
+plots <- mapply(function(sg, lvl) {
+  ttl <- formatC(lvl)
+  lo <- create_layout(sg, "manual", node.positions = data.frame(
+    x = V(sg)$x, y = V(sg)$y
+  ))
+  plot.mapper(lo, aes_(size = ~size, color = ~mean.kNN),
+              list(title = paste("thresh =", lvl))) +
+    coord_cartesian(xlim = xl, ylim = yl) +
+    scale_color_gradient2(midpoint = mean(V(graf)$mean.kNN),
+                          high = "blue", mid = "yellow", low = "red",
+                          limits = cl)
+}, sg = sgs, lvl = edge.lvls[-1], SIMPLIFY = FALSE)
+ncomps <- data.table(threshold = edge.lvls[-1],
+                     b0 = sapply(sgs, count_components))
+ggplot(ncomps, aes(x = threshold, y = b0)) +
+  # geom_point() +
+  geom_line() +
+  scale_y_log10()
+for (i in seq_along(plots)) {
+  save_plot(paste0("david-edge-level-set/frames/", i, ".png"), plots[[i]])
 }

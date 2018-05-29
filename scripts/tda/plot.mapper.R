@@ -10,9 +10,13 @@
 #'
 #' @examples
 plot.mapper <- function(layout, node.aes, labs = NULL, ...) {
-  ggraph(layout) +
-    geom_edge_link0() +
-    geom_node_point(node.aes, ...) +
+  p <- ggraph(layout)
+  if (length(E(attr(layout, "graph"))) > 0) {
+    p <- p + geom_edge_link0()
+  }
+  # ggraph(layout) +
+    # geom_edge_link0() +
+  p + geom_node_point(node.aes, ...) +
     labs(labs) +
     theme(aspect.ratio = 1) +
     theme_graph(base_family = "Helvetica")
