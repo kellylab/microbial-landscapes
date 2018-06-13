@@ -1,11 +1,11 @@
-library(tidyverse)
+# library(tidyverse)
 library(data.table)
 library(philentropy)
-library(TDAmapper)
-library(ggraph)
-library(igraph)
-library(cowplot)
-library(combinat)
+# library(TDAmapper)
+# library(ggraph)
+# library(igraph)
+# library(cowplot)
+# library(combinat)
 
 scripts.dir <- "../r/"
 source(paste0(scripts.dir, "load-prochlorococcus-data.R"))
@@ -20,10 +20,9 @@ prochlorococcus <- prochlorococcus[total.abundance > 0]
 prochlorococcus[, freq := abundance / total.abundance, by = sample]
 distribs <- dcast(prochlorococcus, sample ~ ecotype, value.var = "freq")
 samples <- distribs[, sample]
-# jsds <- JSD(as.matrix(distribs[, -1])) # currently not work
-distribs <- as.matrix(distribs[, -1])
-rownames(distribs) <- samples
-jsds <- data.table(t(combn(samples, 2)))
-names(jsds) <- c("sample.i", "sample.j")
-jsds[, jsd := JSD(distribs[c(sample.i, sample.j),], unit = "log2"),
-     by = 1:nrow(jsds)]
+jsds <- JSD(as.matrix(distribs[, -1]))
+rownames(jsds) <- samples
+colnames(jsds) <- samples
+jsds <- as.data.table(melt(jsds, varnames = c("sample.x", "sample.y"),
+                           value.name = "jsd"))
+fwrite(jsds, "jsds/prochlorococcus.txt", sep = "\t")

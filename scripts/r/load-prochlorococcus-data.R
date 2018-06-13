@@ -47,3 +47,5 @@ prochlorococcus <- c(bats = "bats_orig.txt", hot = "hot_orig.txt") %>%
   sapply(function(fn, root) paste0(root, fn), root = data.dir) %>%
   lapply(read_prochloro) %>%
   rbindlist(idcol = "site")
+prochlorococcus[, sample := paste(site, cruiseid, depth, sep = "-")]
+prochlorococcus[, c("temp", "sal") := lapply(list(temp, sal), as.numeric)]
