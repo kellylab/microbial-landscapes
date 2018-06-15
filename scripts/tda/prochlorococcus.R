@@ -20,6 +20,7 @@ rn <- dist.mat[, sample.x]
 dist.mat <- as.matrix(dist.mat[, -1])
 rownames(dist.mat) <- rn
 samples <- unique(prochlorococcus[, -c("ecotype", "abundance")])
+samples[, phase := sin(pi * month / 2 / 12)]
 
 # mds ---------------------------------------------------------------------
 
@@ -29,7 +30,7 @@ plot(mds$points)
 
 # mapper ------------------------------------------------------------------
 
-po <- 60
+po <- 50
 ni <- c(20, 20)
 mpr <- mapper2D(dist.mat, list(mds$points[, 1], mds$points[, 2]),
                 percent_overlap = po, num_intervals = ni)
@@ -38,26 +39,34 @@ setnames(v2p, "point.name", "sample")
 setkey(v2p, sample)
 setkey(samples, sample)
 v2p <- samples[v2p]
+v2p[, depth := as.numeric(depth)]
 vertices <- v2p[, .(size = .N,
                     f.bats = sum(site == "bats") / .N,
                     mean.depth = mean(depth, na.rm = TRUE),
                     mean.temp = mean(temp, na.rm = TRUE),
-                    mean.sal = mean(sal, na.rm = TRUE)),
+                    mean.sal = mean(sal, na.rm = TRUE),
+                    mean.phase = mean(phase, na.rm = TRUE),
+                    median.depth = median(depth, na.rm = TRUE),
+                    median.temp = median(temp, na.rm = TRUE),
+                    median.sal = median(sal, na.rm = TRUE),
+                    median.phase = median(phase, na.rm = TRUE)
+                    ),
                 by = .(vertex, vertex.name)]
 graf <- mapper.2.igraph(mpr)
 # graf <- induced_subgraph(graf, V(graf)$size > 1)
 setkey(vertices, vertex)
-for (att in c("f.bats", "mean.temp", "mean.sal", "mean.depth")) {
+for (att in c("f.bats", "median.temp", "median.sal", "median.depth",
+              "mean.phase")) {
   graf <- set_vertex_attr(graf, att, V(graf),
                           vertices[as.numeric(V(graf)), get(att)])
 }
-set.seed(0)
+set.seed(1)
 lo <- create_layout(graf, "fr", niter = 500)
 plot.mapper(lo, aes_(size = ~size, color = ~f.bats)) +
   scale_color_distiller(palette = "Spectral")
-plot.mapper(lo, aes_(size = ~size, color = ~mean.temp)) +
+plot.mapper(lo, aes_(size = ~size, color = ~median.temp)) +
   scale_color_distiller(palette = "Spectral")
-plot.mapper(lo, aes_(size = ~size, color = ~mean.sal)) +
+plot.mapper(lo, aes_(size = ~size, color = ~median.sal)) +
   scale_color_distiller(palette = "Spectral")
-plot.mapper(lo, aes_(size = ~size, color = ~mean.depth)) +
+plot.mapper(lo, aes_(size = ~size, color = ~median.depth)) +
   scale_color_distiller(palette = "Spectral")
