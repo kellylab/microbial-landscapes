@@ -16,8 +16,7 @@ source("plot.mapper.R")
 nahant <- nahant[!is.na(kingdom)]
 nahant[, freq := value / sum(value), by = .(kingdom, day)]
 
-
-# sample-level analysis-------------------------------------------------------
+# jsds
 
 jsds <- lapply(split(nahant, by = "kingdom"), function(dt) {
   x <- dcast(dt, day ~ OTU, value.var = "freq", fill = 0)
@@ -47,18 +46,23 @@ mds <- lapply(distances, cmdscale, eig = TRUE)
 for (x in mds) {
   print(x$GOF)
   plot(x$points)
+  hist(x$points[, 1])
+  hist(x$points[, 2])
 }
+rk.mds <- lapply(mds, function(x) {
+  pts <- x$points
+  apply(pts, 2, rank, ties.method = "first")
+})
 
 
 # mapper ------------------------------------------------------------------
 
 ni <- c(10, 10)
 po <- 70
-mpr <- mapply(function(distance, mds) {
-  pts <- mds$points
-  mapper2D(distance, list(pts[, 1], pts[, 2]), num_intervals = ni,
+mpr <- mapply(function(distance, rk.mds) {
+  mapper2D(distance, list(rk.mds[, 1], rk.mds[, 2]), num_intervals = ni,
            percent_overlap = po)
-}, distance = distances, mds = mds, SIMPLIFY = FALSE)
+}, distance = distances, rk.mds = rk.mds, SIMPLIFY = FALSE)
 vertices <- lapply(mpr, function(x) {
   dt <- vertex.2.points(x$points_in_vertex)
   setnames(dt, "point.name", "day")
