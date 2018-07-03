@@ -4,6 +4,7 @@ library(philentropy)
 library(TDAmapper)
 library(ggraph)
 library(igraph)
+library(tidygraph)
 library(cowplot)
 
 scripts.dir <- "../r/"
@@ -46,8 +47,6 @@ mds <- lapply(distances, cmdscale, eig = TRUE)
 for (x in mds) {
   print(x$GOF)
   plot(x$points)
-  hist(x$points[, 1])
-  hist(x$points[, 2])
 }
 rk.mds <- lapply(mds, function(x) {
   pts <- x$points
@@ -63,25 +62,27 @@ mpr <- mapply(function(distance, rk.mds) {
   mapper2D(distance, list(rk.mds[, 1], rk.mds[, 2]), num_intervals = ni,
            percent_overlap = po)
 }, distance = distances, rk.mds = rk.mds, SIMPLIFY = FALSE)
-vertices <- lapply(mpr, function(x) {
+v2p <- lapply(mpr, function(x) {
   dt <- vertex.2.points(x$points_in_vertex)
   setnames(dt, "point.name", "day")
   dt[, day := as.numeric(day)]
   dt
 })
-vertices <- mapply(merge, x = vertices, y = samples, by = "day",
-                   SIMPLIFY = FALSE)
+v2p <- mapply(merge, x = v2p, y = samples, MoreArgs = list(by = "day"),
+              SIMPLIFY = FALSE)
+vertices <- lapply(v2p, function(dt) {
+  dt[, .(mean.day = mean(day),
+         mean.kNN = mean(kNN),
+         size = .N),
+     by = .(vertex, vertex.name)]
+})
 grafs <- lapply(mpr, mapper.2.igraph)
-grafs <- mapply(function(graf, vertices) {
-  vsum <- vertices[, .(size = .N,
-                       mean.day = mean(day),
-                       mean.kNN = mean(kNN)), by = vertex]
-  setkey(vsum, vertex)
-  V(graf)$size <- vsum[.(V(graf)), size]
-  V(graf)$mean.day <- vsum[.(V(graf)), mean.day]
-  V(graf)$mean.kNN <- vsum[.(V(graf)), mean.kNN]
-  graf
-}, graf = grafs, vertices = vertices, SIMPLIFY = FALSE)
+grafs <- mapply(function(graf, verts) {
+  graf %>%
+    as_tbl_graph %>%
+    activate(nodes) %>%
+    left_join(verts, by = c("name" = "vertex.name"))
+}, graf = grafs, verts = vertices, SIMPLIFY = FALSE)
 set.seed(0)
 layouts <- lapply(grafs, create_layout, layout = "fr")
 size.plots <- mapply(function(lo, kingdom) {
@@ -98,3 +99,42 @@ kNN.plots <- mapply(function(lo, kingdom) {
     theme(legend.position = "bottom")
 }, lo = layouts, kingdom = names(layouts), SIMPLIFY = FALSE)
 plot_grid(plotlist = kNN.plots)
+
+
+# frames ------------------------------------------------------------------
+
+grafs <- mapply(function(graf, lo) {
+  graf %>%
+    activate(nodes) %>%
+    mutate(x = lo$x, y = lo$y)
+}, graf = grafs, lo = layouts, SIMPLIFY = FALSE)
+sample.subgraphs <- mapply(function(graf, v2p) {
+  spl <- split(v2p, by = "day")
+  lapply(spl, function(s, graf) {
+    graf %>%
+      slice(s$vertex) %>%
+      mutate(day = s$day)
+  }, graf = graf)
+}, graf = grafs, v2p = v2p, SIMPLIFY = FALSE)
+sample.plots <- mapply(function(sgs, layout) {
+  lapply(sgs, function(sg, layout) {
+    sg <- as.data.frame(sg)
+    day <- unique(sg$day)
+    p <- plot.mapper(layout, aes_(size = ~size), NULL, color = "grey")
+    p + geom_point(aes(x = x, y = y, size = size),
+                 data = sg, color = "blue") +
+      labs(title = day)
+  }, layout = layout)
+}, sgs = sample.subgraphs, layout = layouts)
+for (dt in samples) {
+  setorder(dt, day)
+  dt[, id := seq_len(.N)]
+}
+for (kingdom in names(samples)) {
+  for (x in seq_len(nrow(samples[[1]]))) {
+    day <- samples[[kingdom]][x, day]
+    fn <- paste0(kingdom, x, ".png")
+    save_plot(paste0("nahant-trajectories/frames/", fn),
+              sample.plots[[kingdom]][[x]])
+  }
+}
