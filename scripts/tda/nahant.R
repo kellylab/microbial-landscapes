@@ -138,3 +138,41 @@ for (kingdom in names(samples)) {
               sample.plots[[kingdom]][[x]])
   }
 }
+
+#' # Joint bac-euk analysis
+jdays <- sort(rownames(distances[["Bacteria"]]))
+jdist <- distances %>% 
+  lapply(function(m, jdays) m[jdays, jdays], jdays = jdays) %>% 
+  lapply(function(x) x ^ 2) %>% 
+  do.call("+", .) %>% 
+  sqrt
+jmds2 <- cmdscale(jdist, eig = TRUE)
+jmds2$GOF
+jmds2$points %>% 
+  as.data.table(keep.rownames = "day") %>% 
+  .[, day := as.numeric(day)] %>% 
+  ggplot(aes(x = V1, y = V2)) +
+  geom_point(aes(color = day)) +
+  scale_color_distiller(palette = "Spectral")
+jrkmds2 <- jmds2$points %>% as.data.frame %>% lapply(rank)
+
+# joint mapper ------------------------------------------------------------
+
+jmpr <- mapper2D(jdist, jrkmds2, num_intervals = ni, percent_overlap = po)
+jv2p <- vertex.2.points(jmpr$points_in_vertex)
+ni <- c(10, 10)
+po <- 70
+jmpr <- mapper2D(jdist, jrkmds2, num_intervals = ni, percent_overlap = po)
+jv2p <- vertex.2.points(jmpr$points_in_vertex)
+jv2p[, phase := point / max(point)]
+jverts <- jv2p[, .(size = .N, mean.phase = mean(phase)), 
+               by = .(vertex, vertex.name)]
+jgraf <- mapper.2.igraph(jmpr)
+jgraf <- jgraf %>% 
+  as_tbl_graph %>% 
+  activate(nodes) %>% 
+  left_join(jverts, by = c("name" = "vertex.name"))
+set.seed(0)
+lo <- create_layout(jgraf, "fr")
+plot.mapper(lo, aes_(size = ~size, color = ~mean.phase)) +
+  scale_color_distiller(palette = "Spectral")
