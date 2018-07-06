@@ -97,7 +97,7 @@ plot.mapper(lo, aes_(size = ~size, color = ~f.state),
 # color vertices by mean knn density
 plot.mapper(lo, aes_(size = ~size, color = ~mean.knn),
             list(size = "# samples", color = "mean kNN")) +
-  scale_color_distiller(palette = "Spectral", direction = 1)
+  scale_color_distiller(palette = "Blues")
 
 
 #' # Subject trajectories
