@@ -8,6 +8,7 @@ library(ggraph)
 library(tidygraph)
 
 util.dir <- "../r/"
+figs.dir <- "../../figures/tda/"
 
 source(paste0(util.dir, "load_cholera_data.R"))
 source("vertex.2.points.R")
@@ -93,7 +94,9 @@ lo <- create_layout(graf, "fr", niter = 1000)
 # color by fraction samples marked diarrhea
 plot.mapper(lo, aes_(size = ~size, color = ~f.state),
             list(size = "# samples", color = "f diarrhea")) +
-  scale_color_distiller(palette = "Spectral")
+  scale_color_gradient2(midpoint = 0.5, low = "blue", high = "red")
+save_plot(paste0(figs.dir, "cholera-f-diarrhea.pdf"), last_plot(),
+          base_height = 6)
 # color vertices by mean knn density
 plot.mapper(lo, aes_(size = ~size, color = ~mean.knn),
             list(size = "# samples", color = "mean kNN")) +

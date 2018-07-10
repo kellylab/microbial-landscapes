@@ -8,6 +8,7 @@ library(cowplot)
 library(combinat)
 
 scripts.dir <- "../r/"
+figs.dir <- "../../figures/tda/"
 source(paste0(scripts.dir, "load-prochlorococcus-data.R"))
 source("k.first.R")
 source("vertex.2.points.R")
@@ -97,13 +98,26 @@ plot.mapper(lo, aes_(size = ~size, color = ~mean.temp)) +
   scale_color_distiller(palette = "Spectral")
 #' # Composition varies continuously with depth
 plot.mapper(lo, aes_(size = ~size, color = ~mean.depth)) +
-  scale_color_distiller(palette = "Spectral")
+  scale_color_distiller(palette = "Blues", direction = 1)
+save_plot(paste0(figs.dir, "prochloro-depth.pdf"), last_plot(), base_height = 6)
 #' # Composition is more stable at low depth and high temperature
 plot.mapper(lo, aes_(size = ~size, color = ~mean.knn)) +
   scale_color_distiller(palette = "Spectral")
 #' # Composition is not well-separated by site
-plot.mapper(lo, aes_(size = ~size, color = ~f.bats)) +
-  scale_color_distiller(palette = "Spectral")
+graf <- graf %>%
+  as_tbl_graph %>%
+  activate(nodes) %>%
+  mutate(x = lo$x, y = lo$y)
+site.plots <- mapply(function(d, clr, lo) {
+  sg <- slice(lo, unique(d$vertex))
+  df <- as.data.frame(sg)
+  plot.mapper(lo, aes_(size = ~size), NULL, color = "grey") +
+    geom_point(aes(x = x, y = y, size = size), data = df, color = clr)
+}, d = split(v2p, by = "site"), clr = c("blue", "red"),
+MoreArgs = list(lo = lo), SIMPLIFY = FALSE)
+plot_grid(plotlist = site.plots, labels = toupper(names(site.plots)), nrow = 2)
+save_plot(paste0(figs.dir, "prochloro-sites.pdf"), last_plot(), base_height = 6,
+          nrow = 2)
 #' # Composition is not well-separated by salinity
 #'
 #' BATS is also systematically higher salinity than HOT, so this is skewed.

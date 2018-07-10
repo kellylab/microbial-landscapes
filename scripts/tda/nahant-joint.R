@@ -10,6 +10,8 @@ library(cowplot)
 
 
 scripts.dir <- "../r/"
+figs.dir <- "../../figures/tda/"
+
 source(paste0(scripts.dir, "load-nahant-data.R"))
 source("k.first.R")
 source("vertex.2.points.R")
@@ -54,7 +56,7 @@ jrkmds2 %>%
 
 # joint mapper ------------------------------------------------------------
 
-ni <- c(10, 10)
+ni <- c(15, 15)
 po <- 70
 jmpr <- mapper2D(jdist, as.data.frame(jrkmds2),  num_intervals = ni,
                  percent_overlap = po)
@@ -73,6 +75,8 @@ lo <- create_layout(jgraf, "fr")
 jgraf <- mutate(jgraf, x = lo$x, y = lo$y)
 plot.mapper(lo, aes_(size = ~size, color = ~mean.day)) +
   scale_color_distiller(palette = "Spectral")
+save_plot(paste0(figs.dir, "nahant-joint-mean-day.pdf"), last_plot(),
+          base_height = 6)
 plot.mapper(lo, aes_(size = ~size, color = ~mean.knn)) +
   scale_color_distiller(palette = "Blues")
 
@@ -111,7 +115,7 @@ phyla.plots <- phyla[scaled.rk <= 5] %>%
       xy <- as.data.frame(jgraf)[, c("x", "y")]
       lo <- create_layout(jgraf, "manual", node.positions = xy)
       plot.mapper(lo, aes_string(size = "size", color = ph)) +
-        scale_color_distiller(palette = "Spectral")
+        scale_color_distiller(palette = "Blues", direction = 1)
     }, jgraf = jgraf)
   }, jgraf = jgraf)
 
@@ -121,7 +125,37 @@ phyla.plots[["Bacteria"]]
 #' ### Mean abundance of most variable eukaryotic phyla across the joint space
 phyla.plots[["Eukaryota"]]
 
+#' ### Diatom vs. dinoflagellate ratio
+setkey(nahant, order)
+dia.dino <- nahant[c("Diatomea", "Dinoflagellata"), .(freq = sum(freq)),
+                   by = .(day, order)] %>%
+  dcast(day ~ order, value.var = "freq")
+dia.dino[, ratio := Diatomea / Dinoflagellata]
+jv2p <- merge(jv2p, dia.dino, by = "day")
+setkey(jverts, vertex, vertex.name)
+setkey(jv2p, vertex, vertex.name)
+vdd <- jv2p[, .(
+  mean.dia = mean(Diatomea),
+  mean.dino = mean(Dinoflagellata),
+  mean.ratio = mean(ratio)
+), by = .(vertex, vertex.name)]
+jgraf <- jgraf %>%
+  activate(nodes) %>%
+  left_join(vdd, by = c("vertex" = "vertex", "name" = "vertex.name"))
+jgraf %>%
+  mutate(log.mean.ratio = log10(mean.ratio)) %>%
+  create_layout("manual", node.positions = as.data.frame(select(., x, y))) %>%
+  plot.mapper(aes_(size = ~size, color = ~log.mean.ratio)) +
+  scale_color_gradient2() +
+  labs(title = "Diatomea / Dinoflagellata")
+save_plot(paste0(figs.dir, "nahant-joint-log-dd-ratio.pdf"), last_plot(),
+          base_height = 6)
+
 #' ## Covariance of phyla across the joint space
+
+# covariance analyses -----------------------------------------------------
+
+
 phyla.cor <- phyla.verts[, -1] %>%
   as.matrix %>%
   cor

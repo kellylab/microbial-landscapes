@@ -84,13 +84,18 @@ grafs <- mapply(function(graf, verts) {
 }, graf = grafs, verts = vertices, SIMPLIFY = FALSE)
 set.seed(0)
 layouts <- lapply(grafs, create_layout, layout = "fr")
+grafs <- mapply(function(g, l) {
+  g %>%
+    activate(nodes) %>%
+    mutate(x = l$x, y = l$y)
+}, g = grafs, l = layouts, SIMPLIFY = FALSE)
 size.plots <- mapply(function(lo, kingdom) {
-  p <- plot.mapper(lo, aes_(size = ~size, color = ~mean.day),
-                   list(title = kingdom))
-  p + scale_color_distiller(palette = "Spectral") +
-    theme(legend.position = "bottom")
+  p <- plot.mapper(lo, aes_(size = ~size, color = ~mean.day))
+  p + scale_color_distiller(palette = "Spectral")
 }, lo = layouts, kingdom = names(layouts), SIMPLIFY = FALSE)
-plot_grid(plotlist = size.plots)
+plot_grid(plotlist = size.plots, labels = names(size.plots))
+save_plot(paste0(figs.dir, "nahant-mean-day.pdf"), last_plot(),
+          ncol = 2, base_height = 6)
 kNN.plots <- mapply(function(lo, kingdom) {
   p <- plot.mapper(lo, aes_(size = ~size, color = ~mean.kNN),
                    list(title = kingdom))
@@ -98,6 +103,32 @@ kNN.plots <- mapply(function(lo, kingdom) {
     theme(legend.position = "bottom")
 }, lo = layouts, kingdom = names(layouts), SIMPLIFY = FALSE)
 plot_grid(plotlist = kNN.plots)
+
+#' # Diatom vs dinoflagellate dominance
+setkey(nahant, order)
+dd <- nahant[c("Diatomea", "Dinoflagellata"), .(freq = sum(freq)),
+             by = .(order, day)]
+dd <- dcast(dd, day ~ order, value.var = "freq")
+dd[, ratio := Diatomea / Dinoflagellata]
+v2p <- lapply(v2p, merge, y = dd, by = "day")
+vdd <- lapply(v2p, function(d) {
+  d[, .(mean.dia = mean(Diatomea),
+        mean.dino = mean(Dinoflagellata),
+        mean.ratio = mean(ratio)), by = vertex]
+})
+grafs <- mapply(left_join, x = grafs, y = vdd,
+                MoreArgs = list(by = c("vertex" = "vertex")), SIMPLIFY = FALSE)
+dd.plots <- lapply(grafs, function(g) {
+  g <- mutate(g, log.mean.ratio = log10(mean.ratio))
+  lo <- create_layout(g, "manual",
+                      node.positions = as.data.frame(select(g, x, y)))
+  plot.mapper(lo, aes_(size = ~size, color = ~log.mean.ratio)) +
+    scale_color_gradient2(low = "blue", high = "red") +
+    labs(color = "log10(Dia/Dino)")
+})
+plot_grid(plotlist = dd.plots, labels = names(dd.plots))
+save_plot(paste0(figs.dir, "nahant-log-dd-ratio.pdf"), last_plot(),
+          ncol = 2, base_height = 6)
 
 
 # frames ------------------------------------------------------------------
@@ -139,84 +170,84 @@ for (kingdom in names(samples)) {
 }
 
 #' # Joint bac-euk analysis
-jdays <- sort(rownames(distances[["Bacteria"]]))
-jdist <- distances %>%
-  lapply(function(m, jdays) m[jdays, jdays], jdays = jdays) %>%
-  lapply(function(x) x ^ 2) %>%
-  do.call("+", .) %>%
-  sqrt
-jmds2 <- cmdscale(jdist, eig = TRUE)
-jmds2$GOF
-jmds2$points %>%
-  as.data.table(keep.rownames = "day") %>%
-  .[, day := as.numeric(day)] %>%
-  ggplot(aes(x = V1, y = V2)) +
-  geom_point(aes(color = day)) +
-  scale_color_distiller(palette = "Spectral")
-jrkmds2 <- jmds2$points %>% as.data.frame %>% lapply(rank)
+# jdays <- sort(rownames(distances[["Bacteria"]]))
+# jdist <- distances %>%
+#   lapply(function(m, jdays) m[jdays, jdays], jdays = jdays) %>%
+#   lapply(function(x) x ^ 2) %>%
+#   do.call("+", .) %>%
+#   sqrt
+# jmds2 <- cmdscale(jdist, eig = TRUE)
+# jmds2$GOF
+# jmds2$points %>%
+#   as.data.table(keep.rownames = "day") %>%
+#   .[, day := as.numeric(day)] %>%
+#   ggplot(aes(x = V1, y = V2)) +
+#   geom_point(aes(color = day)) +
+#   scale_color_distiller(palette = "Spectral")
+# jrkmds2 <- jmds2$points %>% as.data.frame %>% lapply(rank)
 
 # joint mapper ------------------------------------------------------------
 
-jmpr <- mapper2D(jdist, jrkmds2, num_intervals = ni, percent_overlap = po)
-jv2p <- vertex.2.points(jmpr$points_in_vertex)
-ni <- c(10, 10)
-po <- 70
-jmpr <- mapper2D(jdist, jrkmds2, num_intervals = ni, percent_overlap = po)
-jv2p <- vertex.2.points(jmpr$points_in_vertex)
-jv2p[, day := as.numeric(jdays[point])]
-jverts <- jv2p[, .(size = .N, mean.day = mean(day)),
-               by = .(vertex, vertex.name)]
-jgraf <- mapper.2.igraph(jmpr)
-jgraf <- jgraf %>%
-  as_tbl_graph %>%
-  activate(nodes) %>%
-  left_join(jverts, by = c("name" = "vertex.name"))
-set.seed(0)
-lo <- create_layout(jgraf, "fr")
-jgraf <- mutate(jgraf, x = lo$x, y = lo$y)
-plot.mapper(lo, aes_(size = ~size, color = ~mean.day)) +
-  scale_color_distiller(palette = "Spectral")
+# jmpr <- mapper2D(jdist, jrkmds2, num_intervals = ni, percent_overlap = po)
+# jv2p <- vertex.2.points(jmpr$points_in_vertex)
+# ni <- c(10, 10)
+# po <- 70
+# jmpr <- mapper2D(jdist, jrkmds2, num_intervals = ni, percent_overlap = po)
+# jv2p <- vertex.2.points(jmpr$points_in_vertex)
+# jv2p[, day := as.numeric(jdays[point])]
+# jverts <- jv2p[, .(size = .N, mean.day = mean(day)),
+#                by = .(vertex, vertex.name)]
+# jgraf <- mapper.2.igraph(jmpr)
+# jgraf <- jgraf %>%
+#   as_tbl_graph %>%
+#   activate(nodes) %>%
+#   left_join(jverts, by = c("name" = "vertex.name"))
+# set.seed(0)
+# lo <- create_layout(jgraf, "fr")
+# jgraf <- mutate(jgraf, x = lo$x, y = lo$y)
+# plot.mapper(lo, aes_(size = ~size, color = ~mean.day)) +
+#   scale_color_distiller(palette = "Spectral")
 
 #' ## Variance of phyla across time
-phyla.days <- nahant[, .(freq = sum(freq)), by = .(kingdom, phylum, day)]
-phyla <- phyla.days[, .(mean = mean(freq), variance = var(freq)),
-                    by = .(kingdom, phylum)]
+# phyla.days <- nahant[, .(freq = sum(freq)), by = .(kingdom, phylum, day)]
+# phyla <- phyla.days[, .(mean = mean(freq), variance = var(freq)),
+#                     by = .(kingdom, phylum)]
 
 #' Variance scales with mean abundance:
-plot(phyla$mean, phyla$variance)
+# plot(phyla$mean, phyla$variance)
 
 #' But the most variable phyla are not the rarest so that's good (not noisy).
-phyla[, scaled.var := variance / mean]
-phyla[, scaled.rk := frank(-scaled.var), by = kingdom]
-ggplot(phyla, aes(x = scaled.rk, y = mean)) +
-  geom_point(data = function(d) filter(d, scaled.rk > 5)) +
-  geom_point(aes(color = phylum),
-             data = function(d) filter(d, scaled.rk <= 5)) +
-  scale_y_log10() +
-  facet_wrap(~ kingdom, nrow = 2)
-
-phyla.verts <- merge(phyla.days, jv2p, by = "day", allow.cartesian = TRUE) %>%
-  .[, .(mean = mean(freq)), by = .(kingdom, phylum, vertex)]
-phyla.verts <- phyla.verts %>%
-  filter(!is.na(phylum)) %>%
-  dcast(vertex ~ phylum, value.var = "mean")
-jgraf <- jgraf %>%
-  activate(nodes) %>%
-  left_join(phyla.verts, by = c("vertex" = "vertex"))
-phyla.plots <- phyla[scaled.rk <= 5] %>%
-  split(by = "kingdom") %>%
-  lapply(function(k, jgraf) {
-    ps <- k[!is.na(phylum), phylum]
-    lapply(ps, function(ph, jgraf) {
-      xy <- as.data.frame(jgraf)[, c("x", "y")]
-      lo <- create_layout(jgraf, "manual", node.positions = xy)
-      plot.mapper(lo, aes_string(size = "size", color = ph)) +
-        scale_color_distiller(palette = "Spectral")
-    }, jgraf = jgraf)
-  }, jgraf = jgraf)
+# phyla[, scaled.var := variance / mean]
+# phyla[, scaled.rk := frank(-scaled.var), by = kingdom]
+# ggplot(phyla, aes(x = scaled.rk, y = mean)) +
+#   geom_point(data = function(d) filter(d, scaled.rk > 5)) +
+#   geom_point(aes(color = phylum),
+#              data = function(d) filter(d, scaled.rk <= 5)) +
+#   scale_y_log10() +
+#   facet_wrap(~ kingdom, nrow = 2)
+#
+# phyla.verts <- merge(phyla.days, jv2p, by = "day", allow.cartesian = TRUE) %>%
+#   .[, .(mean = mean(freq)), by = .(kingdom, phylum, vertex)]
+# phyla.verts <- phyla.verts %>%
+#   filter(!is.na(phylum)) %>%
+#   dcast(vertex ~ phylum, value.var = "mean")
+# jgraf <- jgraf %>%
+#   activate(nodes) %>%
+#   left_join(phyla.verts, by = c("vertex" = "vertex"))
+# phyla.plots <- phyla[scaled.rk <= 5] %>%
+#   split(by = "kingdom") %>%
+#   lapply(function(k, jgraf) {
+#     ps <- k[!is.na(phylum), phylum]
+#     lapply(ps, function(ph, jgraf) {
+#       xy <- as.data.frame(jgraf)[, c("x", "y")]
+#       lo <- create_layout(jgraf, "manual", node.positions = xy)
+#       plot.mapper(lo, aes_string(size = "size", color = ph)) +
+#         scale_color_distiller(palette = "Spectral")
+#     }, jgraf = jgraf)
+#   }, jgraf = jgraf)
 
 #' ## Mean abundance of most variable bacterial phyla across the joint space
-phyla.plots[["Bacteria"]]
+# phyla.plots[["Bacteria"]]
 
 #' ## Mean abundance of most variable eukaryotic phyla across the joint space
-phyla.plots[["Eukaryota"]]
+# phyla.plots[["Eukaryota"]]
