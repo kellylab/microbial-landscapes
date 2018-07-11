@@ -170,3 +170,24 @@ ggplot(ncomponents, aes(x = cal.month, y = ncomps)) +
   geom_point(aes(color = depth)) +
   scale_color_gradient(low = "cyan2", high = "darkblue") +
   facet_wrap(~ site + depth)
+
+transitions <- v2p %>%
+  split(by = c("site", "depth")) %>%
+  lapply(function(d, graf) {
+    d <- unique(d, by = c("month", "cal.month"))
+    setorder(d, month)
+    months <- d$month
+    months <- months[-length(months)]
+    x <- sapply(months, function(m, d, graf) {
+      setkey(d, month)
+      v <- d[.(c(m, m + 1)), unique(vertex)]
+      sg <- slice(graf, v)
+      count_components(sg)
+    }, d = d, graf = graf)
+    data.frame(month = months, cal.month = d[seq(nrow(d) - 1), cal.month], ncomps = x)
+  }, graf = graf) %>%
+  rbindlist(idcol = "bin") %>%
+  .[, c("site", "depth") := tstrsplit(bin, "\\.")]
+ggplot(transitions, aes(x = month, y = ncomps)) +
+  geom_point(aes(color = cal.month)) +
+  facet_wrap(~ site + depth)
