@@ -108,28 +108,32 @@ plot_grid(plotlist = kNN.plots)
 #' # Composition of bacterial components
 bcomps <- components(grafs[["Bacteria"]])
 bmems <- membership(bcomps)
-grafs[["Bacteria"]] %>% 
-  activate(nodes) %>% 
-  mutate(component = as.character(bmems[name])) %>% 
-  create_layout("manual", node.positions = as.data.frame(select(., x, y))) %>% 
+grafs[["Bacteria"]] %>%
+  activate(nodes) %>%
+  mutate(component = as.character(bmems[name])) %>%
+  create_layout("manual", node.positions = as.data.frame(select(., x, y))) %>%
   plot.mapper(aes_(size = ~size, color = ~component))
 save_plot(paste0(figs.dir, "nahant-bac-components.pdf"), last_plot(),
           base_height = 6)
+
+#' Number of samples in each component
 v2p[["Bacteria"]][, component := bmems[vertex.name]]
+v2p[["Bacteria"]][, uniqueN(day), by = component]
+
 setkey(nahant, kingdom)
 phyla.comps <- merge(nahant["Bacteria"], v2p[["Bacteria"]], by = "day",
-                     allow.cartesian = TRUE) %>% 
+                     allow.cartesian = TRUE) %>%
   .[, .(mean.freq = mean(freq)), by = .(component, phylum)]
 phyla.comps[, rank := frank(-mean.freq), by = component]
 
 #' Let's worry only about the 2 largest components:
 setkey(phyla.comps, component)
-phyla.comps[.(c(1, 2))] %>% 
-  dcast(phylum ~ component, value.var = "mean.freq") %>% 
+phyla.comps[.(c(1, 2))] %>%
+  dcast(phylum ~ component, value.var = "mean.freq") %>%
   ggplot(aes(x = `1`, y = `2`)) +
   geom_abline(intercept = 0, slope = 1) +
   geom_point() +
-  geom_point(aes(color = phylum), 
+  geom_point(aes(color = phylum),
              data = function(d) filter(d, `1` > 0.00001 & `2` > 0.000025)) +
   scale_color_brewer(palette = "Dark2")
 save_plot(paste0(figs.dir, "nahant-bac-components-phyla.pdf"), last_plot(),
@@ -152,7 +156,7 @@ grafs <- mapply(left_join, x = grafs, y = vdd,
                 MoreArgs = list(by = c("vertex" = "vertex")), SIMPLIFY = FALSE)
 grafs <- lapply(grafs, function(g) {
   g %>%
-    activate(nodes) %>% 
+    activate(nodes) %>%
     mutate(euk.type = sapply(mean.ratio, function(r) {
       lr <- log10(r)
       if (lr > 0) {
