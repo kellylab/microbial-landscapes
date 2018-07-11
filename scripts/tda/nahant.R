@@ -8,6 +8,7 @@ library(tidygraph)
 library(cowplot)
 
 scripts.dir <- "../r/"
+figs.dir <- "../../figures/tda/"
 source(paste0(scripts.dir, "load-nahant-data.R"))
 source("k.first.R")
 source("vertex.2.points.R")
@@ -104,12 +105,43 @@ kNN.plots <- mapply(function(lo, kingdom) {
 }, lo = layouts, kingdom = names(layouts), SIMPLIFY = FALSE)
 plot_grid(plotlist = kNN.plots)
 
+#' # Composition of bacterial components
+bcomps <- components(grafs[["Bacteria"]])
+bmems <- membership(bcomps)
+grafs[["Bacteria"]] %>% 
+  activate(nodes) %>% 
+  mutate(component = as.character(bmems[name])) %>% 
+  create_layout("manual", node.positions = as.data.frame(select(., x, y))) %>% 
+  plot.mapper(aes_(size = ~size, color = ~component))
+save_plot(paste0(figs.dir, "nahant-bac-components.pdf"), last_plot(),
+          base_height = 6)
+v2p[["Bacteria"]][, component := bmems[vertex.name]]
+setkey(nahant, kingdom)
+phyla.comps <- merge(nahant["Bacteria"], v2p[["Bacteria"]], by = "day",
+                     allow.cartesian = TRUE) %>% 
+  .[, .(mean.freq = mean(freq)), by = .(component, phylum)]
+phyla.comps[, rank := frank(-mean.freq), by = component]
+
+#' Let's worry only about the 2 largest components:
+setkey(phyla.comps, component)
+phyla.comps[.(c(1, 2))] %>% 
+  dcast(phylum ~ component, value.var = "mean.freq") %>% 
+  ggplot(aes(x = `1`, y = `2`)) +
+  geom_abline(intercept = 0, slope = 1) +
+  geom_point() +
+  geom_point(aes(color = phylum), 
+             data = function(d) filter(d, `1` > 0.00001 & `2` > 0.000025)) +
+  scale_color_brewer(palette = "Dark2")
+save_plot(paste0(figs.dir, "nahant-bac-components-phyla.pdf"), last_plot(),
+          base_height = 6)
+
 #' # Diatom vs dinoflagellate dominance
 setkey(nahant, order)
 dd <- nahant[c("Diatomea", "Dinoflagellata"), .(freq = sum(freq)),
              by = .(order, day)]
 dd <- dcast(dd, day ~ order, value.var = "freq")
 dd[, ratio := Diatomea / Dinoflagellata]
+hist(log10(dd$ratio))
 v2p <- lapply(v2p, merge, y = dd, by = "day")
 vdd <- lapply(v2p, function(d) {
   d[, .(mean.dia = mean(Diatomea),
@@ -118,16 +150,32 @@ vdd <- lapply(v2p, function(d) {
 })
 grafs <- mapply(left_join, x = grafs, y = vdd,
                 MoreArgs = list(by = c("vertex" = "vertex")), SIMPLIFY = FALSE)
+grafs <- lapply(grafs, function(g) {
+  g %>%
+    activate(nodes) %>% 
+    mutate(euk.type = sapply(mean.ratio, function(r) {
+      lr <- log10(r)
+      if (lr > 0) {
+        "dia"
+      } else {
+        "dino"
+      }
+    }))
+})
 dd.plots <- lapply(grafs, function(g) {
   g <- mutate(g, log.mean.ratio = log10(mean.ratio))
   lo <- create_layout(g, "manual",
                       node.positions = as.data.frame(select(g, x, y)))
-  plot.mapper(lo, aes_(size = ~size, color = ~log.mean.ratio)) +
-    scale_color_gradient2(low = "blue", high = "red") +
-    labs(color = "log10(Dia/Dino)")
+  # plot.mapper(lo, aes_(size = ~size, color = ~log.mean.ratio)) +
+  #   scale_color_gradient2(low = "blue", high = "red") +
+  #   labs(color = "log10(Dia/Dino)")
+  plot.mapper(lo, aes_(size = ~size, color = ~euk.type)) +
+    labs(color = "dominant")
 })
 plot_grid(plotlist = dd.plots, labels = names(dd.plots))
-save_plot(paste0(figs.dir, "nahant-log-dd-ratio.pdf"), last_plot(),
+# save_plot(paste0(figs.dir, "nahant-log-dd-ratio.pdf"), last_plot(),
+#           ncol = 2, base_height = 6)
+save_plot(paste0(figs.dir, "nahant-dominant-euk.pdf"), last_plot(),
           ncol = 2, base_height = 6)
 
 

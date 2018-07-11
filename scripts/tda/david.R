@@ -15,6 +15,7 @@ source("vertex.2.points.R")
 source("mapper.2.igraph.R")
 source("plot.mapper.R")
 scripts.dir <- "../r/"
+figs.dir <- "../../figures/tda/"
 source(paste0(scripts.dir, "load_david_data.R"))
 
 samples <- unique(david[, .(sample, subject, day)])
@@ -103,6 +104,7 @@ lo <- create_layout(graf, "fr")
 plot.mapper(lo, aes_(size = ~size, color = ~subject),
             list(color = "fraction A")) +
   scale_color_distiller(palette = "Spectral")
+save_plot(paste0(figs.dir, "david-fsubject.pdf"), last_plot(), base_height = 6)
 plot.mapper(lo, aes_(size = ~size, color = ~mean.knn)) +
   scale_color_distiller(trans = "log10")
 
