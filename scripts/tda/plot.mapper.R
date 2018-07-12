@@ -9,10 +9,11 @@
 #' @export
 #'
 #' @examples
-plot.mapper <- function(layout, node.aes, labs = NULL, ...) {
+plot.mapper <- function(layout, node.aes, labs = NULL, edge.color = "black",
+                        ...) {
   p <- ggraph(layout)
   if (length(E(attr(layout, "graph"))) > 0) {
-    p <- p + geom_edge_link0()
+    p <- p + geom_edge_link0(colour = edge.color)
   }
   # ggraph(layout) +
     # geom_edge_link0() +

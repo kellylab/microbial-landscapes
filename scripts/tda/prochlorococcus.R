@@ -157,37 +157,31 @@ for (si in seq_along(depth.phase)) {
   save_plot(fn, pp, nrow = 4, ncol = 4, base_aspect_ratio = 1.5)
 }
 
-ncomponents <- v2p %>%
-  split(by = c("site", "depth", "cal.month")) %>%
-  lapply(function(d, graf) slice(graf, unique(d$vertex)), graf = graf) %>%
-  lapply(count_components) %>%
-  as.data.frame %>%
-  melt(id.vars = NULL, variable.name = "bin", value.name = "ncomps") %>%
-  as.data.table
-ncomponents[, c("site", "depth", "cal.month") := tstrsplit(bin, "\\.", type.convert = TRUE)]
-ggplot(ncomponents, aes(x = cal.month, y = ncomps)) +
-  geom_hline(yintercept = 1) +
-  geom_point(aes(color = depth)) +
-  scale_color_gradient(low = "cyan2", high = "darkblue") +
-  facet_wrap(~ site + depth)
-
-transitions <- v2p %>%
+#' # Trajectories
+sample.xy <- merge(v2p, as.data.frame(graf), by = "vertex") %>%
+  .[, .(x = mean(x), y = mean(y)), by = .(site, depth, month, year, cal.month)]
+setorder(sample.xy, site, depth, month)
+sample.jumps <- sample.xy %>%
   split(by = c("site", "depth")) %>%
   lapply(function(d, graf) {
-    d <- unique(d, by = c("month", "cal.month"))
     setorder(d, month)
-    months <- d$month
-    months <- months[-length(months)]
-    x <- sapply(months, function(m, d, graf) {
-      setkey(d, month)
-      v <- d[.(c(m, m + 1)), unique(vertex)]
-      sg <- slice(graf, v)
-      count_components(sg)
-    }, d = d, graf = graf)
-    data.frame(month = months, cal.month = d[seq(nrow(d) - 1), cal.month], ncomps = x)
-  }, graf = graf) %>%
-  rbindlist(idcol = "bin") %>%
-  .[, c("site", "depth") := tstrsplit(bin, "\\.")]
-ggplot(transitions, aes(x = month, y = ncomps)) +
-  geom_point(aes(color = cal.month)) +
-  facet_wrap(~ site + depth)
+    plot.mapper(as.layout.manual(graf), aes_(size = ~size), NULL, "grey",
+                color = "grey") +
+      geom_path(aes(x = x, y = y, color = cal.month / 12), data = d,
+                arrow = arrow(angle = 15, type = "open",
+                              length = unit(10, "points"))
+                ) +
+      geom_point(aes(x = x, y = y, color = cal.month / 12), data = d) +
+      season_gradient +
+      guides(size = FALSE) +
+      labs(color = "month i")
+  }, graf = graf)
+sample.jumps <- unique(prochlorococcus[, .(site, depth)]) %>%
+  setorder(site, depth) %>%
+  .[, paste(site, depth, sep = ".")] %>%
+  sample.jumps[.]
+save_plot(paste0(figs.dir, "prochloroccocus-steps.pdf"),
+  plot_grid(plotlist = sample.jumps, labels = names(sample.jumps),
+            nrow = 4, ncol = 6),
+  nrow = 4, ncol = 6, base_height = 4
+  )
