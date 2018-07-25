@@ -128,16 +128,23 @@ phyla.comps[, rank := frank(-mean.freq), by = component]
 
 #' Let's worry only about the 2 largest components:
 setkey(phyla.comps, component)
+ps <- 3
 phyla.comps[.(c(1, 2))] %>%
   dcast(phylum ~ component, value.var = "mean.freq") %>%
   ggplot(aes(x = `1`, y = `2`)) +
   geom_abline(intercept = 0, slope = 1) +
-  geom_point() +
+  geom_point(size = ps) +
+  coord_equal() +
+  labs(x = "component 1 abundance", y = "component 2 abundance") +
   geom_point(aes(color = phylum),
-             data = function(d) filter(d, `1` > 0.00001 & `2` > 0.000025)) +
-  scale_color_brewer(palette = "Dark2")
+             data = function(d) filter(d, `1` > 0.00001 & `2` > 0.000025),
+             size = ps
+             ) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_y_continuous(labels = function(x) scales::scientific(x, 1)) +
+  theme(legend.position = "bottom")
 save_plot(paste0(figs.dir, "nahant-bac-components-phyla.pdf"), last_plot(),
-          base_height = 6)
+          base_height = 4, base_aspect_ratio = 2.5)
 
 #' # Diatom vs dinoflagellate dominance
 setkey(nahant, order)

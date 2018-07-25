@@ -16,6 +16,7 @@ source("dist2knn.R")
 source("mapper.2.igraph.R")
 source("plot.mapper.R")
 source("sample.subgraphs.R")
+source("local.extrema.R")
 
 # load data ---------------------------------------------------------------
 
@@ -85,7 +86,21 @@ graf <- mapper.2.igraph(mpr)
 graf <- graf %>%
   as_tbl_graph %>%
   activate(nodes) %>%
-  left_join(vertices, by = c("name" = "vertex.name"))
+  left_join(vertices, by = c("name" = "vertex.name")) %>%
+  mutate(knn.min = local.extrema(., val = "mean.knn"))
+dist.2.min <- distances(graf, to = which(V(graf)$knn.min)) %>%
+  apply(1, min)
+get.basin <- function(v, labels = names(v)) {
+  w <- which(v == min(v))
+  if (length(w) == 1) {
+    labels[w]
+  } else {
+    NA
+  }
+}
+basin <- distances(graf, to = which(V(graf)$knn.min)) %>%
+  apply(1, get.basin)
+graf <- mutate(graf, basin)
 
 # draw graphs -------------------------------------------------------------
 
@@ -98,9 +113,23 @@ plot.mapper(lo, aes_(size = ~size, color = ~f.state),
 save_plot(paste0(figs.dir, "cholera-f-diarrhea.pdf"), last_plot(),
           base_height = 6)
 # color vertices by mean knn density
-plot.mapper(lo, aes_(size = ~size, color = ~mean.knn),
-            list(size = "# samples", color = "mean kNN")) +
-  scale_color_distiller(palette = "Blues")
+ggraph(lo) +
+  geom_edge_link2(aes(colour = node.mean.knn)) +
+  geom_node_point(aes(size = size, color = mean.knn)) +
+  scale_color_distiller(palette = "Blues") +
+  scale_edge_color_distiller(palette = "Blues") +
+  theme_graph(base_family = "Helvetica")
+
+#' Local mean kNN minima and basins:
+ej <- get_edges()(lo) %>%
+  mutate(to.color = node1.basin == node2.basin & !is.na(node1.basin) &
+           !is.na(node2.basin))
+ggraph(lo) +
+  geom_edge_link0(colour = "grey50", data = filter(ej, !to.color)) +
+  geom_edge_link(aes(colour = node1.basin), data = filter(ej, to.color),
+                 show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = basin)) +
+  theme_graph(base_family = "Helvetica")
 
 
 #' # Subject trajectories
@@ -234,3 +263,4 @@ for (i in seq(nrow(gordon.samples))) {
 #   save_plot(fn, lvlset.grafs[[i]])
 # }
 #
+
