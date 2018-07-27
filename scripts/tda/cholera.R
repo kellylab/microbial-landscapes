@@ -88,21 +88,28 @@ graf <- graf %>%
   activate(nodes) %>%
   left_join(vertices, by = c("name" = "vertex.name")) %>%
   mutate(knn.min = local.extrema(., val = "mean.knn"))
+# TODO ASSIGNING BASINS OF ATTRACTION NOT REALLY WORKING
+min2basin <- filter(graf, knn.min) %>%
+  components %>%
+  membership
 dgraf <- gradient.graf(graf, "mean.knn")
-get.basin <- function(v, labels = names(v)) {
-  w <- which(v == min(v))
-  if (length(w) == 1) {
-    labels[w]
+get.basin <- function(v, lab = names(v), map) {
+  w <- lab[v == min(v)]
+  b <- unique(map[w])
+  browser()
+  if (length(b) == 1) {
+    b
   } else {
     NA
   }
 }
-basin <- distances(dgraf, to = which(V(graf)$knn.min)) %>%
-  apply(1, get.basin)
-graf <- mutate(graf, basin)
-
-# draw graphs -------------------------------------------------------------
-
+dist.2.min <- distances(dgraf, to = which(V(graf)$knn.min))
+v2min <- dist.2.min %>%
+  apply(1, get.basin, map = min2basin) %>%
+  data.table(vertex = names(.), min = .)
+v2min[, basin := as.character(min2basin[min])]
+graf <- left_join(graf, v2min, by = c("name" = "vertex"))
+# draw graphs
 set.seed(1)
 lo <- create_layout(graf, "fr", niter = 1000)
 # color by fraction samples marked diarrhea
@@ -128,7 +135,7 @@ ggraph(lo) +
   geom_edge_link(aes(colour = node1.basin), data = filter(ej, to.color),
                  show.legend = FALSE) +
   geom_node_point(aes(size = size, color = basin)) +
-  geom_node_point(aes(size = size), data = filter(lo, knn.min), 
+  geom_node_point(aes(size = size), data = filter(lo, knn.min),
                   shape = 21, color = "black") +
   guides(size = FALSE) +
   theme_graph(base_family = "Helvetica")
