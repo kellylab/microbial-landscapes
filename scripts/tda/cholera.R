@@ -88,8 +88,7 @@ graf <- graf %>%
   activate(nodes) %>%
   left_join(vertices, by = c("name" = "vertex.name")) %>%
   mutate(knn.min = local.extrema(., val = "mean.knn"))
-dist.2.min <- distances(graf, to = which(V(graf)$knn.min)) %>%
-  apply(1, min)
+dgraf <- gradient.graf(graf, "mean.knn")
 get.basin <- function(v, labels = names(v)) {
   w <- which(v == min(v))
   if (length(w) == 1) {
@@ -98,7 +97,7 @@ get.basin <- function(v, labels = names(v)) {
     NA
   }
 }
-basin <- distances(graf, to = which(V(graf)$knn.min)) %>%
+basin <- distances(dgraf, to = which(V(graf)$knn.min)) %>%
   apply(1, get.basin)
 graf <- mutate(graf, basin)
 
@@ -129,6 +128,9 @@ ggraph(lo) +
   geom_edge_link(aes(colour = node1.basin), data = filter(ej, to.color),
                  show.legend = FALSE) +
   geom_node_point(aes(size = size, color = basin)) +
+  geom_node_point(aes(size = size), data = filter(lo, knn.min), 
+                  shape = 21, color = "black") +
+  guides(size = FALSE) +
   theme_graph(base_family = "Helvetica")
 
 
