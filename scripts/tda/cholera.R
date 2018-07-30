@@ -16,7 +16,7 @@ source("dist2knn.R")
 source("mapper.2.igraph.R")
 source("plot.mapper.R")
 source("sample.subgraphs.R")
-source("local.extrema.R")
+source("assign.basins.R")
 
 # load data ---------------------------------------------------------------
 
@@ -69,6 +69,9 @@ plot(mds2$points)
 rk.mds <- apply(mds2$points, 2, rank)
 plot(rk.mds)
 
+# mapper call -------------------------------------------------------------
+
+
 po <- 70
 ni <- c(10, 10)
 mpr <- mapper2D(js.dist, filter_values = list(rk.mds[,1], rk.mds[,2]),
@@ -88,28 +91,11 @@ graf <- graf %>%
   activate(nodes) %>%
   left_join(vertices, by = c("name" = "vertex.name")) %>%
   mutate(knn.min = local.extrema(., val = "mean.knn"))
-# TODO ASSIGNING BASINS OF ATTRACTION NOT REALLY WORKING
-min2basin <- filter(graf, knn.min) %>%
-  components %>%
-  membership
-dgraf <- gradient.graf(graf, "mean.knn")
-get.basin <- function(v, lab = names(v), map) {
-  w <- lab[v == min(v)]
-  b <- unique(map[w])
-  browser()
-  if (length(b) == 1) {
-    b
-  } else {
-    NA
-  }
-}
-dist.2.min <- distances(dgraf, to = which(V(graf)$knn.min))
-v2min <- dist.2.min %>%
-  apply(1, get.basin, map = min2basin) %>%
-  data.table(vertex = names(.), min = .)
-v2min[, basin := as.character(min2basin[min])]
-graf <- left_join(graf, v2min, by = c("name" = "vertex"))
-# draw graphs
+graf <- assign.basins(graf, fn = "mean.knn", down = TRUE)
+
+# draw graphs -------------------------------------------------------------
+
+
 set.seed(1)
 lo <- create_layout(graf, "fr", niter = 1000)
 # color by fraction samples marked diarrhea

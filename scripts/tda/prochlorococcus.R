@@ -18,6 +18,7 @@ source("k.first.R")
 source("month.2.phase.R")
 source("layout.tbl.graph.R")
 source("as.layout.manual.R")
+source("assign.basins.R")
 jsds <- fread("jsds/prochlorococcus.txt")
 jsds[, distance := sqrt(jsd)]
 dist.mat <- dcast(jsds, sample.x ~ sample.y, value.var = "distance")
@@ -36,11 +37,6 @@ k <- floor(nrow(samples) / 10)
 knn <- apply(dist.mat, 1, k.first, k = k)
 hist(knn)
 set(samples, NULL, "knn", knn[samples$sample])
-
-# l-infinity --------------------------------------------------------------
-
-# linf <- linf(dist.mat)
-# hist(linf)
 
 # mds ---------------------------------------------------------------------
 
@@ -89,31 +85,80 @@ vertices <- v2p[, .(size = .N,
 graf <- mapper.2.igraph(mpr) %>%
   as_tbl_graph %>%
   left_join(vertices, by = c("name" = "vertex.name"))
+graf <- assign.basins(graf, "mean.knn")
 set.seed(1)
+lo <- create_layout(graf, "fr", niter = 500)
 graf <- layout.tbl.graph(graf, "fr", niter = 500)
 
-#' # Composition varies continuously with temperature
-plot.mapper(as.layout.manual(graf), aes_(size = ~size, color = ~mean.temp)) +
-  scale_color_distiller(palette = "Spectral")
+# plotting ----------------------------------------------------------------
+theme_set(theme_graph(base_family = "Helvetica"))
 
+
+#' # Local kNN minima and basins of attraction
+ggraph(lo) +
+  geom_edge_link0(data = filter(get_edges()(lo), node1.basin != node2.basin |
+                                  is.na(node1.basin) | is.na(node2.basin)),
+                  colour = "grey") +
+  geom_edge_link(aes(colour = node1.basin),
+                 data = filter(get_edges()(lo), node1.basin == node2.basin &
+                                 !is.na(node1.basin)),
+                 show.legend = FALSE) +
+  geom_node_point(aes(size = size), 
+                  data = filter(get_nodes()(lo), is.na(basin)),
+                  color = "grey") +
+  geom_node_point(aes(size = size, color = basin), 
+                  data = filter(get_nodes()(lo), !is.na(basin))) +
+  geom_node_point(aes(size = size), 
+                  data = filter(get_nodes()(lo), is.extremum),
+                  shape = 21) +
+  guides(size = FALSE) 
+save_plot(paste0(figs.dir, "prochloro-basins.pdf"), last_plot(), 
+          base_height = 6)
+  
+
+#' # Composition varies continuously with temperature
+ggraph(lo) +
+  geom_edge_link2(aes(colour = node.mean.temp), show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = mean.temp)) +
+  scale_color_distiller(palette = "Spectral") +
+  scale_edge_color_distiller(palette = "Spectral") +
+  guides(size = FALSE)
+save_plot(paste0(figs.dir, "prochloro-temp.pdf"), last_plot(), base_height = 6)
+  
 #' # Composition varies continuously with depth
-plot.mapper(as.layout.manual(graf), aes_(size = ~size, color = ~mean.depth)) +
-  scale_color_distiller(palette = "Blues", direction = 1)
+ggraph(lo) +
+  geom_edge_link2(aes(colour = node.mean.temp), show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = mean.depth)) +
+  scale_color_distiller(palette = "Blues", direction = 1) +
+  scale_edge_color_distiller(palette = "Blues", direction = 1) +
+  guides(size = FALSE)
 save_plot(paste0(figs.dir, "prochloro-depth.pdf"), last_plot(), base_height = 6)
 
 #' # Composition is more stable at low depth and high temperature
-plot.mapper(as.layout.manual(graf), aes_(size = ~size, color = ~mean.knn)) +
-  scale_color_distiller(palette = "Spectral")
+ggraph(lo) +
+  geom_edge_link2(aes(colour = node.mean.knn), show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = mean.knn)) +
+  scale_color_distiller(palette = "Blues") +
+  scale_edge_color_distiller(palette = "Blues") +
+  guides(size = FALSE)
 
 #' # Composition is not well-separated by site
-site.plots <- mapply(function(d, clr, graf) {
-  lo <- as.layout.manual(graf)
-  sg <- slice(lo, unique(d$vertex))
-  df <- as.data.frame(sg)
-  plot.mapper(lo, aes_(size = ~size), NULL, color = "grey") +
-    geom_point(aes(x = x, y = y, size = size), data = df, color = clr)
+site.plots <- mapply(function(d, clr, lo) {
+  vs <- unique(d$vertex)
+  ggraph(lo) +
+    geom_edge_link0(colour = "grey",
+                    data = filter(get_edges()(lo),
+                                  !(node1.vertex %in% vs) & 
+                                    !(node2.vertex %in% vs))) +
+    geom_edge_link0(data = filter(get_edges()(lo),
+                                  node1.vertex %in% vs & 
+                                    node2.vertex %in% vs),
+                    colour = clr) +
+    geom_node_point(aes(size = size), color = "grey") +
+    geom_node_point(aes(size = size), data = slice(get_nodes()(lo), vs), 
+                    color = clr)
 }, d = split(v2p, by = "site"), clr = c("blue", "red"),
-MoreArgs = list(graf = graf), SIMPLIFY = FALSE)
+MoreArgs = list(lo = lo), SIMPLIFY = FALSE)
 plot_grid(plotlist = site.plots, labels = toupper(names(site.plots)), nrow = 2)
 save_plot(paste0(figs.dir, "prochloro-sites.pdf"), last_plot(), base_height = 6,
           nrow = 2)
@@ -121,52 +166,28 @@ save_plot(paste0(figs.dir, "prochloro-sites.pdf"), last_plot(), base_height = 6,
 #' # Composition is not well-separated by salinity
 #'
 #' BATS is also systematically higher salinity than HOT, so this is skewed.
-plot.mapper(as.layout.manual(graf), aes_(size = ~size, color = ~mean.sal)) +
-  scale_color_distiller(palette = "Spectral")
-
-#' # Monthwise gradients per site + depth
-season_gradient <- scale_color_gradientn(
-  values = scales::rescale(c(1, 3, 6, 9, 12), c(0, 1)),
-  colors = c("blue", "green", "yellow", "red", "blue"),
-  labels = c("1", "3", "6", "9", "12"),
-  limits = c(0, 1))
-depth.phase <- v2p %>%
-  split(by = c("site", "depth"), flatten = FALSE) %>%
-  lapply(function(d) {
-    lapply(d, function(d, graf) {
-      d2 <- d[, .(mean.phase = mean(cal.month) /  12), by = vertex]
-      sg <- as.data.frame(slice(graf, d2$vertex))
-      sg <- merge(sg, d2, by = "vertex")
-      # browser()
-      plot.mapper(as.layout.manual(graf), aes_(size = ~size), NULL,
-                  color = "grey") +
-       geom_point(aes(x = x, y = y, size = size, color = mean.phase), data = sg) +
-        guides(size = FALSE) +
-        season_gradient +
-        labs(color = "mean month")
-      }, graf = graf)
-  })
-for (si in seq_along(depth.phase)) {
-  depths <- names(depth.phase[[si]]) %>%
-    as.numeric %>%
-    sort %>%
-    as.character
-  depth.phase[[si]] <- depth.phase[[si]][depths]
-  pp <- plot_grid(plotlist = depth.phase[[si]], labels = depths)
-  fn <- paste0(figs.dir, "prochloro-phase-", names(depth.phase)[si], ".pdf")
-  save_plot(fn, pp, nrow = 4, ncol = 4, base_aspect_ratio = 1.5)
-}
+ggraph(lo) +
+  geom_edge_link2(aes(colour = node.mean.sal), show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = mean.sal)) +
+  scale_color_distiller(palette = "Blues") +
+  scale_edge_color_distiller(palette = "Blues") +
+  guides(size = FALSE)
 
 #' # Trajectories
-sample.xy <- merge(v2p, as.data.frame(graf), by = "vertex") %>%
+sample.xy <- lo %>% 
+  select(vertex, x, y) %>% 
+  merge(v2p, by = "vertex") %>% 
+  merge(as.data.frame(graf), by = "vertex") %>%
+  as.data.table %>%
   .[, .(x = mean(x), y = mean(y)), by = .(site, depth, month, year, cal.month)]
 setorder(sample.xy, site, depth, month)
 sample.jumps <- sample.xy %>%
   split(by = c("site", "depth")) %>%
-  lapply(function(d, graf) {
+  lapply(function(d, lo) {
     setorder(d, month)
-    plot.mapper(as.layout.manual(graf), aes_(size = ~size), NULL, "grey",
-                color = "grey") +
+    ggraph(lo) +
+      geom_edge_link0(colour = "grey") +
+      geom_node_point(aes(size = size), colour = "grey") +
       geom_path(aes(x = x, y = y, color = cal.month / 12), data = d,
                 arrow = arrow(angle = 15, type = "open",
                               length = unit(10, "points"))
@@ -175,7 +196,7 @@ sample.jumps <- sample.xy %>%
       season_gradient +
       guides(size = FALSE) +
       labs(color = "month i")
-  }, graf = graf)
+  }, lo = lo)
 sample.jumps <- unique(prochlorococcus[, .(site, depth)]) %>%
   setorder(site, depth) %>%
   .[, paste(site, depth, sep = ".")] %>%
