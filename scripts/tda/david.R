@@ -14,6 +14,7 @@ source("dist2knn.R")
 source("vertex.2.points.R")
 source("mapper.2.igraph.R")
 source("plot.mapper.R")
+source("assign.basins.R")
 scripts.dir <- "../r/"
 figs.dir <- "../../figures/tda/"
 source(paste0(scripts.dir, "load_david_data.R"))
@@ -76,7 +77,7 @@ plot(rk.mds)
 #' # Mapper
 #' ## Filter by 2D MDS
 
-# mds filter -------------------------------------------------------------
+# mapper call -------------------------------------------------------------
 
 ftr <- list(rk.mds[, 1], rk.mds[, 2])
 ni <- c(20, 20)
@@ -96,18 +97,120 @@ graf <- graf %>%
   activate(nodes) %>%
   left_join(vertices, by = c("name" = "vertex.name"))
 
+#' Find basins of attraction:
+graf <- assign.basins(graf, "mean.knn")
+
 #' ## Plots
 
-#' Fraction of samples in each vertex belonging to each subject:
+# plotting ----------------------------------------------------------------
+
+
+#' ### Fraction of samples in each vertex belonging to each subject
 set.seed(0)
 lo <- create_layout(graf, "fr")
-plot.mapper(lo, aes_(size = ~size, color = ~subject),
-            list(color = "fraction A")) +
-  scale_color_distiller(palette = "Spectral")
+theme_set(theme_graph(base_family = "Helvetica"))
+ggraph(lo) +
+  geom_edge_link0(colour = "grey") +
+  # geom_edge_link2(aes(colour = node.subject)) +
+  geom_node_point(aes(size = size, color = subject)) +
+  labs(color = "fraction A") +
+  scale_color_distiller(palette = "Spectral") +
+  guides(size = FALSE)
 save_plot(paste0(figs.dir, "david-fsubject.pdf"), last_plot(), base_height = 6)
-plot.mapper(lo, aes_(size = ~size, color = ~mean.knn)) +
-  scale_color_distiller(trans = "log10")
 
+#' ### Basins of attraction
+ggraph(lo) +
+  geom_edge_link0(data = filter(get_edges()(lo), node1.basin != node2.basin |
+                                  is.na(node1.basin) | is.na(node2.basin)),
+                  colour = "black") +
+  geom_edge_link0(aes(colour = node1.basin),
+                  data = filter(get_edges()(lo), node1.basin == node2.basin),
+                  show.legend = FALSE) +
+  geom_node_point(aes(size = size, fill = basin), shape = 21) +
+  geom_node_point(aes(size = size),
+                  data = filter(get_nodes()(lo), is.extremum),
+                  shape = 21, color = "red") +
+  guides(size = FALSE)
+save_plot(paste0(figs.dir, "david-basins.pdf"), last_plot(), base_height = 6)
+
+#' ## Subject trajectories by basin
+sample.basins <- graf %>%
+  activate(nodes) %>%
+  select(-subject) %>%
+  as.data.table %>%
+  merge(v2p, by = "vertex") %>%
+  .[, basin := factor(basin, levels = as.character(sort(as.numeric(
+    unique(basin)))))]
+ggplot(sample.basins, aes(x = day, y = basin)) +
+  geom_point(aes(color = event)) +
+  facet_wrap(~ subject, ncol = 1, scales = "free_y") +
+  theme_cowplot() +
+  background_grid(major = "y")
+
+#' Distribution across basins during different events
+ggplot(sample.basins, aes(x = basin)) +
+  geom_bar(aes(y = ..prop.., group = event, fill = event),
+           position = "dodge") +
+  facet_wrap(~ subject, scales = "free_x")
+event.basin.N <- sample.basins %>%
+  .[, .N, by = .(subject, event, basin)] %>%
+  dcast(subject + event ~ basin, value.var = "N", fill = 0)
+se <- paste(event.basin.N$subject, event.basin.N$event, sep = ".")
+event.basin.N <- as.matrix(event.basin.N[, -c(1, 2)])
+rownames(event.basin.N) <- se
+basin.jsd <- JSD(event.basin.N, est.prob = "empirical")
+rownames(basin.jsd) <- se
+colnames(basin.jsd) <- se
+melt(basin.jsd, varnames = c("event.i", "event.j"), value.name = "jsd") %>%
+  ggplot(aes(x = event.i, y = event.j)) +
+  geom_tile(aes(fill = jsd)) +
+  theme_cowplot() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  scale_fill_distiller(palette = "Blues", direction = -1) +
+  coord_equal()
+
+#' JSDs of distribution across vertices during different events
+v2p[, frac := 1 / .N, by = point]
+event.vdist <- v2p[, .(N = sum(frac)), by = .(subject, event, vertex)] #%>%
+event.densities <- event.vdist %>%
+  split(by = c("subject", "event")) %>%
+  lapply(function(event, lo) {
+    nodes <- left_join(get_nodes()(lo), event, by = "vertex")
+    ggraph(lo) +
+      geom_edge_link0(colour = "grey") +
+      # geom_node_point(aes(alpha = N, size = size),
+      #                 data = left_join(get_nodes()(lo), event, by = "vertex"),
+      #                 ) +
+      geom_node_point(data = filter(nodes, is.na(N)), color = "grey") +
+      geom_node_point(aes(color = N), data = filter(nodes, !is.na(N))) +
+      scale_color_distiller(palette = "Spectral") +
+      # scale_color_gradient(high = "blue", low = "grey", na.value = "grey") +
+      # scale_fill_gradient(low = "white", na.value = "white") +
+      scale_alpha(na.value = 0) +
+      coord_equal() +
+      guides(size = FALSE)
+
+  }, lo = lo)
+plot_grid(plotlist = event.densities, labels = names(event.densities),
+          ncol = 5, align = "hv")
+save_plot(paste0(figs.dir, "david-event-densities.pdf"),
+          last_plot(), ncol = 5, base_height = 6,
+          base_aspect_ratio = 0.7)
+event.vdist <- event.vdist %>%
+  dcast(subject + event ~ vertex, value.var = "N", fill = 0)
+se <- paste(event.vdist$subject, event.vdist$event, sep = ".")
+event.vdist <- as.matrix(event.vdist[, -c(1, 2)])
+rownames(event.vdist) <- se
+vdist.jsd <- JSD(event.vdist, est.prob = "empirical")
+rownames(vdist.jsd) <- se
+colnames(vdist.jsd) <- se
+melt(vdist.jsd, varnames = c("event.i", "event.j"), value.name = "jsd") %>%
+  ggplot(aes(x = event.i, y = event.j)) +
+  geom_tile(aes(fill = jsd)) +
+  theme_cowplot() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  scale_fill_distiller(palette = "Blues", direction = -1) +
+  coord_equal()
 
 # subject frames ----------------------------------------------------------
 
