@@ -178,14 +178,9 @@ event.densities <- event.vdist %>%
     nodes <- left_join(get_nodes()(lo), event, by = "vertex")
     ggraph(lo) +
       geom_edge_link0(colour = "grey") +
-      # geom_node_point(aes(alpha = N, size = size),
-      #                 data = left_join(get_nodes()(lo), event, by = "vertex"),
-      #                 ) +
       geom_node_point(data = filter(nodes, is.na(N)), color = "grey") +
       geom_node_point(aes(color = N), data = filter(nodes, !is.na(N))) +
       scale_color_distiller(palette = "Spectral") +
-      # scale_color_gradient(high = "blue", low = "grey", na.value = "grey") +
-      # scale_fill_gradient(low = "white", na.value = "white") +
       scale_alpha(na.value = 0) +
       coord_equal() +
       guides(size = FALSE)
