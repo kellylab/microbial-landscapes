@@ -93,9 +93,19 @@ graf <- mapper.2.igraph(mpr) %>%
   left_join(vertices, by = c("name" = "vertex.name"))
 # assign minima and basins
 graf <- assign.basins(graf, "mean.knn")
+# undo singleton basins (those with only 1 vertex)
+graf <- graf %>% # TODO NO WORK
+  group_by(basin) %>%
+  mutate(is.extremum = ifelse(n() > 1, is.extremum, FALSE),
+         newbasin = ifelse(n() > 1, basin, NA_character_)) %>%
+  ungroup %>%
+  mutate(newbasin = NULL)
 
-# draw graphs -------------------------------------------------------------
 
+# draw plots --------------------------------------------------------------
+
+
+subplots <- list() # list of subplots
 
 set.seed(1)
 lo <- create_layout(graf, "fr", niter = 1000)
@@ -107,7 +117,9 @@ ggraph(lo) +
   scale_color_gradient2(midpoint = 0.5, low = "blue", high = "red") +
   scale_edge_colour_gradient2(midpoint = 0.5, low = "blue", high = "red") +
   coord_equal() +
-  guides(size = FALSE)
+  guides(size = FALSE) +
+  theme_graph(base_family = "Helvetica")
+subplots[["fstate"]] <- last_plot()
 save_plot(paste0(figs.dir, "cholera-f-diarrhea.pdf"), last_plot(),
           base_height = 6)
 # color vertices by mean knn density
@@ -129,7 +141,10 @@ ggraph(lo) +
   geom_node_point(aes(size = size), data = filter(lo, is.extremum),
                   shape = 21, color = "black") +
   coord_equal() +
-  guides(size = FALSE)
+  guides(size = FALSE) +
+  theme_graph(base_family = "Helvetica")
+
+subplots[["basins"]] <- last_plot()
 save_plot(paste0(figs.dir, "cholera-basins.pdf"), last_plot(), base_height = 6)
 
 
@@ -182,6 +197,7 @@ pp <- plot_grid(p1 + theme(legend.position = "none"),
                 p2 + theme(legend.position = "none"),
                 align = "hv", ncol = 2, vjust = 0)
 plot_grid(pp, get_legend(p1), rel_widths = c(1, .1))
+subplots[["basins.series"]] <- last_plot()
 save_plot(paste0(figs.dir, "cholera-basin-time-series.pdf"), last_plot(),
           nrow = 1, ncol = 2, base_height = 6, base_aspect_ratio = 0.7)
 
@@ -195,6 +211,7 @@ d2basin %>%
   facet_wrap(~ diagnosis, scales = "free_x") +
   scale_fill_brewer(palette = "Dark2") +
   background_grid(major = "xy")
+subplots[["basins.distrib"]] <- last_plot()
 save_plot(paste0(figs.dir, "cholera-basin-fractions.pdf"),
           last_plot(), base_height = 6)
 theme_set(theme_graph(base_family = "Helvetica"))
@@ -222,6 +239,14 @@ plot_grid(plotlist = density.plots, labels = names(density.plots),
 save_plot(paste0(figs.dir, "cholera-2d-probability-mass.pdf"),
           last_plot(), ncol = 4, nrow = 4, base_height = 3)
 
+#' Recovery times:
+gordon[, .(duration = max(hour[diagnosis == "diarrhea"])), by = subject] %>%
+  merge(d2basin, by = "subject") %>%
+  filter(diagnosis == "diarrhea" & basin %in% c("3", "10")) %>%
+  ggplot(aes(x = subject, y = frac)) +
+  geom_col(aes(fill = basin)) +
+  labs(y = "fraction time")
+
 #' ## JSD between subject-diagnosis states
 m <- dcast(d2basin, subject + diagnosis ~ basin, value.var = "frac", fill = 0)
 rn <- sort(paste(m$diagnosis, m$subject, sep = "."))
@@ -237,39 +262,41 @@ melt(jsd, varnames = c("state.i", "state.j"), value.name = "jsd") %>%
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
   scale_fill_gradient2()
 
+#' # Paper figure
+plot_grid(plotlist = subplots, labels = "AUTO", ncol = 2)
 
 #  subject trajectories ----------------------------------------------------
-graf <- graf %>%
-  activate(nodes) %>%
-  mutate(x = lo$x, y = lo$y)
-subject.phases <- v2p %>%
-  split(by = "subject") %>%
-  lapply(function(dt, graf) {
-    max.i <- max(dt$idx)
-    v <- dt[, .(progression = mean(progression)), by = .(vertex, vertex.name)]
-    sg <- graf %>%
-      slice(v$vertex)
-    sg %>%
-      activate(nodes) %>%
-      left_join(v, by = c("name" = "vertex.name"))
-
-  }, graf = graf)
-subject.phase.plots <- mapply(function(g, subj, global) {
-  d <- as.data.frame(g)
-  plot.mapper(global, aes_(size = ~size), labs(title = subj), color = "grey") +
-    geom_point(aes(x = x, y = y, size = size, color = progression), data = d) +
-    scale_color_distiller(palette = "Spectral", direction = 1)
-}, g = subject.phases, subj = names(subject.phases),
-MoreArgs = list(global = lo), SIMPLIFY = FALSE)
-for (i in seq_along(subject.phase.plots)) {
-  fn <- paste0("cholera-subject-trajectories/phases/",
-               names(subject.phase.plots)[i], ".png")
-  save_plot(fn, subject.phase.plots[[i]], base_height = 6)
-}
-
-#' ## "Top" arc progressions
-cl1 <- c("A", "F", "G")
-plot_grid(plotlist = subject.phase.plots[cl1], labels = cl1)
+#graf <- graf %>%
+#  activate(nodes) %>%
+#  mutate(x = lo$x, y = lo$y)
+#subject.phases <- v2p %>%
+#  split(by = "subject") %>%
+#  lapply(function(dt, graf) {
+#    max.i <- max(dt$idx)
+#    v <- dt[, .(progression = mean(progression)), by = .(vertex, vertex.name)]
+#    sg <- graf %>%
+#      slice(v$vertex)
+#    sg %>%
+#      activate(nodes) %>%
+#      left_join(v, by = c("name" = "vertex.name"))
+#
+#  }, graf = graf)
+#subject.phase.plots <- mapply(function(g, subj, global) {
+#  d <- as.data.frame(g)
+#  plot.mapper(global, aes_(size = ~size), labs(title = subj), color = "grey") +
+#    geom_point(aes(x = x, y = y, size = size, color = progression), data = d) +
+#    scale_color_distiller(palette = "Spectral", direction = 1)
+#}, g = subject.phases, subj = names(subject.phases),
+#MoreArgs = list(global = lo), SIMPLIFY = FALSE)
+#for (i in seq_along(subject.phase.plots)) {
+#  fn <- paste0("cholera-subject-trajectories/phases/",
+#               names(subject.phase.plots)[i], ".png")
+#  save_plot(fn, subject.phase.plots[[i]], base_height = 6)
+#}
+#
+##' ## "Top" arc progressions
+#cl1 <- c("A", "F", "G")
+#plot_grid(plotlist = subject.phase.plots[cl1], labels = cl1)
 
 #' ## Other
 cl.other <- c("B", "C", "D", "E")
