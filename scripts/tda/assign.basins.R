@@ -1,4 +1,4 @@
-assign.basins <- function(tbl_graf, fn, down = TRUE) {
+assign.basins <- function(tbl_graf, fn, down = TRUE, ignore.singletons = TRUE) {
   library(tidygraph)
   library(igraph)
   source("local.extrema.R")
@@ -30,5 +30,14 @@ assign.basins <- function(tbl_graf, fn, down = TRUE) {
   tbl_graf <- tbl_graf %>%
     activate(nodes) %>%
     mutate(basin = as.character(v2min[name]))
+  if (ignore.singletons) {
+    tbl_graf <- tbl_graf %>%
+      group_by(basin) %>%
+      mutate(is.extremum = if (n() > 1) is.extremum else FALSE,
+             newbasin = if (n() > 1) basin else NA_character_) %>%
+      ungroup %>%
+      mutate(basin = newbasin) %>%
+      mutate(newbasin = NULL)
+  }
   tbl_graf
 }
