@@ -31,7 +31,7 @@ dist.mat <- as.matrix(dist.mat[, -1])
 rownames(dist.mat) <- sample.names
 
 # calculate k nearest neighbors
-k <- 10
+k <- round(nrow(samples) / 10)
 kNN <- dist2knn(dist.mat, k)
 samples[, kNN := kNN[sample]]
 
@@ -98,40 +98,64 @@ graf <- graf %>%
   left_join(vertices, by = c("name" = "vertex.name"))
 
 #' Find basins of attraction:
-graf <- assign.basins(graf, "mean.knn")
+graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
+graf <- graf %>% 
+  activate(nodes) %>% 
+  mutate(basin = factor(basin,
+                        levels = as.character(sort(as.numeric(unique(basin))),
+                                              na.last = TRUE)))
 
 #' ## Plots
 
-# plotting ----------------------------------------------------------------
+# paper figure ----------------------------------------------------------------
 
 
-#' ### Fraction of samples in each vertex belonging to each subject
+#' Fraction of samples in each vertex belonging to each subject
 set.seed(0)
 lo <- create_layout(graf, "fr")
-theme_set(theme_graph(base_family = "Helvetica"))
-ggraph(lo) +
-  geom_edge_link0(colour = "grey") +
-  # geom_edge_link2(aes(colour = node.subject)) +
+subplots <- list()
+subplots$fsubject <- ggraph(lo) +
+  geom_edge_link2(aes(colour = node.subject), show.legend = FALSE) +
   geom_node_point(aes(size = size, color = subject)) +
   labs(color = "fraction A") +
   scale_color_distiller(palette = "Spectral") +
+  scale_edge_colour_distiller(palette = "Spectral") +
+  theme_graph(base_family = "Helvetica") +
+  coord_equal() +
   guides(size = FALSE)
-save_plot(paste0(figs.dir, "david-fsubject.pdf"), last_plot(), base_height = 6)
+# save_plot(paste0(figs.dir, "david-fsubject.pdf"), last_plot(), base_height = 6)
+
+#' kNN
+subplots$knn <- ggraph(lo) +
+  geom_edge_link2(aes(colour = node.mean.knn), show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = mean.knn)) +
+  labs(color = "mean\nkNN") +
+  scale_color_distiller(palette = "Blues") +
+  scale_edge_colour_distiller(palette = "Blues") +
+  theme_graph(base_family = "Helvetica") +
+  coord_equal() +
+  guides(size = FALSE)
 
 #' ### Basins of attraction
-ggraph(lo) +
+subplots$basins <- ggraph(lo) +
   geom_edge_link0(data = filter(get_edges()(lo), node1.basin != node2.basin |
                                   is.na(node1.basin) | is.na(node2.basin)),
-                  colour = "black") +
+                  colour = "grey50") +
   geom_edge_link0(aes(colour = node1.basin),
                   data = filter(get_edges()(lo), node1.basin == node2.basin),
                   show.legend = FALSE) +
-  geom_node_point(aes(size = size, fill = basin), shape = 21) +
+  geom_node_point(aes(size = size),
+                  data = filter(get_nodes()(lo), is.na(basin)), color = "grey50") +
+  geom_node_point(aes(size = size, color = basin),
+                  data = filter(get_nodes()(lo), !is.na(basin))) +
   geom_node_point(aes(size = size),
                   data = filter(get_nodes()(lo), is.extremum),
-                  shape = 21, color = "red") +
+                  shape = 21) +
+  coord_equal() +
+  theme_graph(base_family = "Helvetica") +
+  theme(legend.position = "none") +
   guides(size = FALSE)
-save_plot(paste0(figs.dir, "david-basins.pdf"), last_plot(), base_height = 6)
+# save_plot(paste0(figs.dir, "david-basins.pdf"), last_plot(), base_height = 6)
 
 #' ## Subject trajectories by basin
 sample.basins <- graf %>%
@@ -139,35 +163,56 @@ sample.basins <- graf %>%
   select(-subject) %>%
   as.data.table %>%
   merge(v2p, by = "vertex") %>%
-  .[, basin := factor(basin, levels = as.character(sort(as.numeric(
-    unique(basin)))))]
-ggplot(sample.basins, aes(x = day, y = basin)) +
-  geom_point(aes(color = event)) +
-  facet_wrap(~ subject, ncol = 1, scales = "free_y") +
-  theme_cowplot() +
-  background_grid(major = "y")
+  .[, .N, by = .(subject, day, point, event, basin)]  
+sample.basins[, i := rank(basin, ties.method = "first"), by = point]
+theme_set(theme_cowplot(font_size = 8))
+basins <- sample.basins$basin %>% 
+  unique %>% 
+  sort(na.last = TRUE)
+sample.basins[, i := rank(basin, ties.method = "first"), by = point]
+pseries <- sample.basins %>% 
+  ggplot(aes(x = day, y = basin)) +
+  geom_point(data = function(dt) filter(dt, is.na(basin)),
+             color = "grey50", shape = 21, size = 1) +
+  geom_point(aes(color = event),
+             data = function(dt) filter(dt, !is.na(basin)), size = 1) +
+  # geom_tile(aes(fill = basin)) +
+  scale_y_discrete(limits = basins) +
+  scale_color_brewer(palette = "Dark2") +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+        legend.position = "bottom") +
+  guides(color = guide_legend(direction = "horizontal", nrow = 2)) +
+  background_grid(major = "y") +
+  facet_grid(subject ~ .)
 
 #' Distribution across basins during different events
-ggplot(sample.basins, aes(x = basin)) +
-  geom_bar(aes(y = ..prop.., group = event, fill = event),
-           position = "dodge") +
-  facet_wrap(~ subject, scales = "free_x")
-event.basin.N <- sample.basins %>%
-  .[, .N, by = .(subject, event, basin)] %>%
-  dcast(subject + event ~ basin, value.var = "N", fill = 0)
-se <- paste(event.basin.N$subject, event.basin.N$event, sep = ".")
-event.basin.N <- as.matrix(event.basin.N[, -c(1, 2)])
-rownames(event.basin.N) <- se
-basin.jsd <- JSD(event.basin.N, est.prob = "empirical")
-rownames(basin.jsd) <- se
-colnames(basin.jsd) <- se
-melt(basin.jsd, varnames = c("event.i", "event.j"), value.name = "jsd") %>%
-  ggplot(aes(x = event.i, y = event.j)) +
-  geom_tile(aes(fill = jsd)) +
-  theme_cowplot() +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
-  scale_fill_distiller(palette = "Blues", direction = -1) +
-  coord_equal()
+pdistribs <- sample.basins %>% 
+  group_by(subject, event) %>%
+  mutate(frac = N / sum(N)) %>%
+  group_by(subject, event, basin) %>% 
+  summarize(frac = sum(frac)) %>% 
+  ggplot(aes(x = event)) +
+  geom_col(aes(y = frac, group = basin, fill = basin),
+           position = "stack") +
+  coord_flip() +
+  labs(y = "fraction samples") +
+  guides(fill = guide_legend(direction = "horizontal", nrow = 1,
+                             label.position = "bottom")) +
+  facet_grid(subject ~ ., scales = "free")
+basin.legend <- get_legend(pdistribs)
+pdistribs <- pdistribs + theme(legend.position = "none")
+subplots$basin.distribs <- plot_grid(pseries, pdistribs, 
+                                     nrow = 2, #align = "hv", axis = "lt",
+                                     labels = c("D", "E"), 
+                                     rel_heights = c(1.5, 1))
+plot_grid(plot_grid(plotlist = subplots, labels = c("A", "B", "C", NA), nrow = 2), 
+          basin.legend, nrow = 2, rel_heights = c(5, 1))
+save_plot(paste0(figs.dir, "paper/fig3.pdf"), last_plot(), nrow = 2, ncol = 2)
+
+
+# other figures -----------------------------------------------------------
+
+
 
 #' JSDs of distribution across vertices during different events
 v2p[, frac := 1 / .N, by = point]
