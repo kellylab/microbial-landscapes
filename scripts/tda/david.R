@@ -99,8 +99,8 @@ graf <- graf %>%
 
 #' Find basins of attraction:
 graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
-graf <- graf %>% 
-  activate(nodes) %>% 
+graf <- graf %>%
+  activate(nodes) %>%
   mutate(basin = factor(basin,
                         levels = as.character(sort(as.numeric(unique(basin))),
                                               na.last = TRUE)))
@@ -118,8 +118,10 @@ subplots$fsubject <- ggraph(lo) +
   geom_edge_link2(aes(colour = node.subject), show.legend = FALSE) +
   geom_node_point(aes(size = size, color = subject)) +
   labs(color = "fraction A") +
-  scale_color_distiller(palette = "Spectral") +
-  scale_edge_colour_distiller(palette = "Spectral") +
+  # scale_color_distiller(palette = "Spectral") +
+  # scale_edge_colour_distiller(palette = "Spectral") +
+  scale_color_gradient2(high = "Blue", low = "Red", midpoint = 0.5) +
+  scale_edge_color_gradient2(high = "Blue", low = "Red", midpoint = 0.5) +
   theme_graph(base_family = "Helvetica") +
   coord_equal() +
   guides(size = FALSE)
@@ -152,9 +154,10 @@ subplots$basins <- ggraph(lo) +
                   data = filter(get_nodes()(lo), is.extremum),
                   shape = 21) +
   coord_equal() +
-  theme_graph(base_family = "Helvetica") +
-  theme(legend.position = "none") +
-  guides(size = FALSE)
+  theme_graph(base_family = "Helvetica", base_size = 10) +
+  # guides(color = guide_legend(ncol = 3)) +
+  # theme(legend.position = "none") +
+  guides(size = FALSE, color = FALSE)
 # save_plot(paste0(figs.dir, "david-basins.pdf"), last_plot(), base_height = 6)
 
 #' ## Subject trajectories by basin
@@ -163,51 +166,57 @@ sample.basins <- graf %>%
   select(-subject) %>%
   as.data.table %>%
   merge(v2p, by = "vertex") %>%
-  .[, .N, by = .(subject, day, point, event, basin)]  
+  .[, .N, by = .(subject, day, point, event, basin)]
 sample.basins[, i := rank(basin, ties.method = "first"), by = point]
 theme_set(theme_cowplot(font_size = 8))
-basins <- sample.basins$basin %>% 
-  unique %>% 
+basins <- sample.basins$basin %>%
+  unique %>%
   sort(na.last = TRUE)
 sample.basins[, i := rank(basin, ties.method = "first"), by = point]
-pseries <- sample.basins %>% 
+pseries <- sample.basins %>%
   ggplot(aes(x = day, y = basin)) +
-  geom_point(data = function(dt) filter(dt, is.na(basin)),
-             color = "grey50", shape = 21, size = 1) +
-  geom_point(aes(color = event),
-             data = function(dt) filter(dt, !is.na(basin)), size = 1) +
-  # geom_tile(aes(fill = basin)) +
+  # geom_point(data = function(dt) filter(dt, is.na(basin)),
+  #            color = "grey50", shape = 21, size = 1) +
+  # geom_point(aes(color = event),
+  #            data = function(dt) filter(dt, !is.na(basin)), size = 1) +
+  geom_tile(data = function(dt) filter(dt, is.na(basin)), fill = "grey") +
+  geom_tile(aes(fill = event), data = function(dt) filter(dt, !is.na(basin))) +
   scale_y_discrete(limits = basins) +
-  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Set1") +
+  guides(fill = guide_legend(direction = "horizontal", nrow = 1)) +
   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
         legend.position = "bottom") +
-  guides(color = guide_legend(direction = "horizontal", nrow = 2)) +
-  background_grid(major = "y") +
+  # background_grid(major = "y") +
   facet_grid(subject ~ .)
 
 #' Distribution across basins during different events
-pdistribs <- sample.basins %>% 
+pdistribs <- sample.basins %>%
   group_by(subject, event) %>%
   mutate(frac = N / sum(N)) %>%
-  group_by(subject, event, basin) %>% 
-  summarize(frac = sum(frac)) %>% 
+  group_by(subject, event, basin) %>%
+  summarize(frac = sum(frac)) %>%
   ggplot(aes(x = event)) +
   geom_col(aes(y = frac, group = basin, fill = basin),
            position = "stack") +
   coord_flip() +
   labs(y = "fraction samples") +
-  guides(fill = guide_legend(direction = "horizontal", nrow = 1,
-                             label.position = "bottom")) +
+  guides(fill = guide_legend(direction = "horizontal", nrow = 5)) +
+  theme(legend.position = "top") +
   facet_grid(subject ~ ., scales = "free")
 basin.legend <- get_legend(pdistribs)
-pdistribs <- pdistribs + theme(legend.position = "none")
-subplots$basin.distribs <- plot_grid(pseries, pdistribs, 
-                                     nrow = 2, #align = "hv", axis = "lt",
-                                     labels = c("D", "E"), 
-                                     rel_heights = c(1.5, 1))
-plot_grid(plot_grid(plotlist = subplots, labels = c("A", "B", "C", NA), nrow = 2), 
-          basin.legend, nrow = 2, rel_heights = c(5, 1))
-save_plot(paste0(figs.dir, "paper/fig3.pdf"), last_plot(), nrow = 2, ncol = 2)
+# pdistribs <- pdistribs + theme(legend.position = "none")
+# subplots$basin.distribs <- plot_grid(pseries, pdistribs,
+#                                      nrow = 2, #align = "hv", axis = "lt",
+#                                      labels = c("D", "E"),
+#                                      rel_heights = c(1.5, 1))
+subplots$basin.distribs <- pdistribs
+subplots$basin.series <- pseries
+plot_grid(plot_grid(plotlist = subplots[1:4], labels = "AUTO", nrow = 2),
+          subplots$basin.series, labels = c("", "E"),
+          #basin.legend,
+          nrow = 2, rel_heights = c(4, 1.5))
+save_plot(paste0(figs.dir, "paper/fig3.pdf"), last_plot(), nrow = 2, ncol = 1,
+          base_width = 8)
 
 
 # other figures -----------------------------------------------------------

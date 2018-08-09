@@ -122,12 +122,9 @@ subplots[["fstate"]] <- ggraph(lo) +
   scale_color_gradient2(midpoint = 0.5, low = "blue", high = "red") +
   scale_edge_colour_gradient2(midpoint = 0.5, low = "blue", high = "red") +
   labs(color = "fraction\ndiarrhea") +
+  guides(size = FALSE) +
   coord_equal() +
-  theme_graph(base_family = "Helvetica")
-# subplots[["fstate"]] <- last_plot()
-# save_plot(paste0(figs.dir, "cholera-f-diarrhea.pdf"), last_plot(),
-#           base_height = 6)
-# color vertices by mean knn density
+  theme_graph(base_family = "Helvetica", base_size = 10)
 subplots[["knn"]] <- ggraph(lo) +
   geom_edge_link2(aes(colour = node.mean.knn), show.legend = FALSE) +
   geom_node_point(aes(size = size, color = mean.knn)) +
@@ -137,7 +134,6 @@ subplots[["knn"]] <- ggraph(lo) +
   theme_graph(base_family = "Helvetica") +
   coord_equal() +
   scale_edge_color_distiller(palette = "Blues")
-# subplots[["knn"]] <- last_plot()
 
 #' Local mean kNN minima and basins:
 ej <- get_edges()(lo) %>%
@@ -156,12 +152,8 @@ subplots[["basins"]] <- ggraph(lo) +
   geom_node_point(aes(size = size), data = filter(lo, is.extremum),
                   shape = 21, color = "black") +
   coord_equal() +
-  guides(size = FALSE) +
-  theme_graph(base_family = "Helvetica")
-
-# subplots[["basins"]] <- last_plot()
-# save_plot(paste0(figs.dir, "cholera-basins.pdf"), last_plot(), base_height = 6)
-
+  theme_graph(base_family = "Helvetica") +
+  theme(legend.position = "none")
 
 #' # Subject dynamics
 
@@ -194,15 +186,17 @@ theme_set(theme_cowplot(font_size = 10) +
   theme(axis.text.y = element_blank(), axis.title.y = element_blank(),
         axis.ticks.y = element_blank(), panel.spacing.y = unit(0, "points"))
   )
-pseries <- p2basin %>%
-  ggplot(aes(x = time, y = i)) +
+subplots$basin.series <- p2basin %>%
+  ggplot(aes(x = time, y = basin)) +
   geom_tile(aes(fill = basin)) +
   facet_grid(subject ~ diagnosis, scales = "free_x") +
+  theme(axis.ticks.y = element_blank()) +
   labs(x = "time (hour/day)") +
+  guides(fill = guide_legend(nrow = 1)) +
   theme(legend.position = "none")
 d2basin <- p2basin[, .(N = sum(N)), by = .(subject, diagnosis, basin)]
 d2basin[, frac := N / sum(N), by = .(subject, diagnosis)]
-pdistribs <- d2basin %>%
+subplots$basin.distribs <- d2basin %>%
   ggplot(aes(x = subject, y = frac)) +
   geom_col(aes(fill = basin)) +
   coord_flip() +
@@ -211,16 +205,15 @@ pdistribs <- d2basin %>%
   guides(fill = guide_legend(nrow = 1, direction = "horizontal",
                              label.position = "bottom")) +
   labs(y = "fraction samples") #+
-subplots[["basins.distrib"]] <- plot_grid(pseries,
-                                          pdistribs,
-                                          nrow = 2, align = "hv", axis = "l",
-                                          rel_heights = c(1, 1))
-pfig <- plot_grid(plotlist = subplots, labels = "AUTO",
-                  ncol = 2, nrow = 2, label_y = c(1, 1, 1, 1.1))
+plot_grid(plot_grid(subplots$fstate, subplots$knn,
+                    subplots$basins, subplots$basin.distribs,
+                    nrow = 2, labels = "AUTO"),
+          subplots$basin.series, ncol = 1, rel_heights = c(4, 1.5),
+          labels = c("", "E"))
 save_plot(paste0(figs.dir, "paper/fig2.pdf"),
-          pfig,
-          base_aspect_ratio = 1.3,
-          ncol = 2, nrow = 2)
+          last_plot(),
+          base_aspect_ratio = 1.3, base_width = 8,
+          ncol = 1, nrow = 2)
 
 
 # other figures -----------------------------------------------------------

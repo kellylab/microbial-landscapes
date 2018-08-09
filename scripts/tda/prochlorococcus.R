@@ -5,7 +5,6 @@ library(TDAmapper)
 library(ggraph)
 library(igraph)
 library(cowplot)
-library(combinat)
 
 scripts.dir <- "../r/"
 figs.dir <- "../../figures/tda/"
@@ -13,11 +12,8 @@ source(paste0(scripts.dir, "load-prochlorococcus-data.R"))
 source("k.first.R")
 source("vertex.2.points.R")
 source("mapper.2.igraph.R")
-source("plot.mapper.R")
 source("k.first.R")
 source("month.2.phase.R")
-source("layout.tbl.graph.R")
-source("as.layout.manual.R")
 source("assign.basins.R")
 jsds <- fread("jsds/prochlorococcus.txt")
 jsds[, distance := sqrt(jsd)]
@@ -85,17 +81,47 @@ vertices <- v2p[, .(size = .N,
 graf <- mapper.2.igraph(mpr) %>%
   as_tbl_graph %>%
   left_join(vertices, by = c("name" = "vertex.name"))
-graf <- assign.basins(graf, "mean.knn")
+graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
+basins <- vertex_attr(graf, "basin") %>%
+  as.character %>% unique %>% as.numeric %>% sort(na.last = TRUE) %>%
+  as.character
+graf <- mutate(graf, basin = factor(basin, levels = basins))
 set.seed(1)
 lo <- create_layout(graf, "fr", niter = 500)
-graf <- layout.tbl.graph(graf, "fr", niter = 500)
 
-# plotting ----------------------------------------------------------------
+# paper figure ----------------------------------------------------------------
+subplots <- list()
 theme_set(theme_graph(base_family = "Helvetica"))
 
+#' Composition varies continuously with temperature
+subplots$temp <- ggraph(lo) +
+  geom_edge_link2(aes(colour = node.mean.temp), show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = mean.temp)) +
+  scale_color_distiller(palette = "Spectral") +
+  scale_edge_color_distiller(palette = "Spectral") +
+  labs(color = "C") +
+  guides(size = FALSE)
 
-#' # Local kNN minima and basins of attraction
-ggraph(lo) +
+#' Composition varies continuously with depth
+subplots$depth <- ggraph(lo) +
+  geom_edge_link2(aes(colour = node.mean.depth), show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = mean.depth)) +
+  scale_color_distiller(palette = "Blues", direction = 1) +
+  scale_edge_color_distiller(palette = "Blues", direction = 1) +
+  labs(color = "m") +
+  guides(size = FALSE)
+
+#' Composition is more stable at low depth and high temperature
+subplots$knn <- ggraph(lo) +
+  geom_edge_link2(aes(colour = node.mean.knn), show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = mean.knn)) +
+  scale_color_distiller(palette = "Blues") +
+  scale_edge_color_distiller(palette = "Blues") +
+  labs(color = "mean\nkNN") +
+  guides(size = FALSE)
+
+#' Local kNN minima and basins of attraction
+subplots$basins <- ggraph(lo) +
   geom_edge_link0(data = filter(get_edges()(lo), node1.basin != node2.basin |
                                   is.na(node1.basin) | is.na(node2.basin)),
                   colour = "grey") +
@@ -103,44 +129,51 @@ ggraph(lo) +
                  data = filter(get_edges()(lo), node1.basin == node2.basin &
                                  !is.na(node1.basin)),
                  show.legend = FALSE) +
-  geom_node_point(aes(size = size), 
+  geom_node_point(aes(size = size),
                   data = filter(get_nodes()(lo), is.na(basin)),
                   color = "grey") +
-  geom_node_point(aes(size = size, color = basin), 
+  geom_node_point(aes(size = size, color = basin),
                   data = filter(get_nodes()(lo), !is.na(basin))) +
-  geom_node_point(aes(size = size), 
+  geom_node_point(aes(size = size),
                   data = filter(get_nodes()(lo), is.extremum),
                   shape = 21) +
-  guides(size = FALSE) 
-save_plot(paste0(figs.dir, "prochloro-basins.pdf"), last_plot(), 
-          base_height = 6)
-  
+  guides(size = FALSE, color = guide_legend(ncol = 2))
 
-#' # Composition varies continuously with temperature
-ggraph(lo) +
-  geom_edge_link2(aes(colour = node.mean.temp), show.legend = FALSE) +
-  geom_node_point(aes(size = size, color = mean.temp)) +
-  scale_color_distiller(palette = "Spectral") +
-  scale_edge_color_distiller(palette = "Spectral") +
-  guides(size = FALSE)
-save_plot(paste0(figs.dir, "prochloro-temp.pdf"), last_plot(), base_height = 6)
-  
-#' # Composition varies continuously with depth
-ggraph(lo) +
-  geom_edge_link2(aes(colour = node.mean.temp), show.legend = FALSE) +
-  geom_node_point(aes(size = size, color = mean.depth)) +
-  scale_color_distiller(palette = "Blues", direction = 1) +
-  scale_edge_color_distiller(palette = "Blues", direction = 1) +
-  guides(size = FALSE)
-save_plot(paste0(figs.dir, "prochloro-depth.pdf"), last_plot(), base_height = 6)
+#' Dynamics by basin
+p2basin <- graf %>% activate(nodes) %>% as.data.table %>%
+  merge(v2p, by = "vertex") %>%
+  .[, .N, by = .(site, depth, month, day, cal.month, basin)]
+theme_set(theme_cowplot(font_size = 10))
+pseries <- ggplot(p2basin, aes(x = month, y = basin)) +
+  geom_tile(data = function(x) filter(x, is.na(basin)), fill = "grey50") +
+  geom_tile(aes(fill = cal.month),
+            data = function(x) filter(x, !is.na(basin))) +
+  facet_wrap(~ site + depth, nrow = 4) +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
+  scale_y_discrete(limits = c(basins, NA)) +
+  scale_fill_gradientn(values = scales::rescale(c(0, 3, 6, 9, 12), c(0, 1)),
+                       colours = c("blue", "green", "yellow", "red", "blue")) +
+  labs(fill = "calendar\nmonth")
+pdistribs <- p2basin[, .(N = sum(N)), by = .(site, depth, cal.month, basin)] %>%
+  .[, frac := N / sum(N), by = .(site, depth, cal.month)] %>%
+  ggplot(aes(x = cal.month, y = frac)) +
+  geom_col(aes(fill = basin)) +
+  facet_wrap(~ site + depth, nrow = 4) +
+  scale_x_continuous(breaks = seq(1, 12, by = 2),
+                     labels = as.character(seq(1, 12, by = 2))) +
+  labs(x = "calendar month", y = "fraction samples")
+plot_grid(pseries, pdistribs, nrow = 2, labels = "AUTO", align = "hv",
+          axis = "lt")
 
-#' # Composition is more stable at low depth and high temperature
-ggraph(lo) +
-  geom_edge_link2(aes(colour = node.mean.knn), show.legend = FALSE) +
-  geom_node_point(aes(size = size, color = mean.knn)) +
-  scale_color_distiller(palette = "Blues") +
-  scale_edge_color_distiller(palette = "Blues") +
-  guides(size = FALSE)
+plot_grid(plotlist = subplots, labels = "AUTO", nrow = 2)
+save_plot(paste0(figs.dir, "paper/fig4.pdf"), last_plot(), base_width = 4,
+          nrow = 2, ncol = 2)
+
+
+# other figures -----------------------------------------------------------
+
+
+
 
 #' # Composition is not well-separated by site
 site.plots <- mapply(function(d, clr, lo) {
@@ -148,14 +181,14 @@ site.plots <- mapply(function(d, clr, lo) {
   ggraph(lo) +
     geom_edge_link0(colour = "grey",
                     data = filter(get_edges()(lo),
-                                  !(node1.vertex %in% vs) & 
+                                  !(node1.vertex %in% vs) &
                                     !(node2.vertex %in% vs))) +
     geom_edge_link0(data = filter(get_edges()(lo),
-                                  node1.vertex %in% vs & 
+                                  node1.vertex %in% vs &
                                     node2.vertex %in% vs),
                     colour = clr) +
     geom_node_point(aes(size = size), color = "grey") +
-    geom_node_point(aes(size = size), data = slice(get_nodes()(lo), vs), 
+    geom_node_point(aes(size = size), data = slice(get_nodes()(lo), vs),
                     color = clr)
 }, d = split(v2p, by = "site"), clr = c("blue", "red"),
 MoreArgs = list(lo = lo), SIMPLIFY = FALSE)
@@ -174,9 +207,9 @@ ggraph(lo) +
   guides(size = FALSE)
 
 #' # Trajectories
-sample.xy <- lo %>% 
-  select(vertex, x, y) %>% 
-  merge(v2p, by = "vertex") %>% 
+sample.xy <- lo %>%
+  select(vertex, x, y) %>%
+  merge(v2p, by = "vertex") %>%
   merge(as.data.frame(graf), by = "vertex") %>%
   as.data.table %>%
   .[, .(x = mean(x), y = mean(y)), by = .(site, depth, month, year, cal.month)]
