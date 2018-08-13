@@ -91,7 +91,7 @@ lo <- create_layout(graf, "fr", niter = 500)
 
 # paper figure ----------------------------------------------------------------
 subplots <- list()
-theme_set(theme_graph(base_family = "Helvetica"))
+node.maxsize <- 4
 
 #' Composition varies continuously with temperature
 subplots$temp <- ggraph(lo) +
@@ -99,7 +99,10 @@ subplots$temp <- ggraph(lo) +
   geom_node_point(aes(size = size, color = mean.temp)) +
   scale_color_distiller(palette = "Spectral") +
   scale_edge_color_distiller(palette = "Spectral") +
+  scale_size_area(max_size = node.maxsize) +
   labs(color = "C") +
+  coord_equal() +
+  theme_graph(base_family = "Helvetica", base_size = 10) +
   guides(size = FALSE)
 
 #' Composition varies continuously with depth
@@ -108,16 +111,22 @@ subplots$depth <- ggraph(lo) +
   geom_node_point(aes(size = size, color = mean.depth)) +
   scale_color_distiller(palette = "Blues", direction = 1) +
   scale_edge_color_distiller(palette = "Blues", direction = 1) +
+  scale_size_area(max_size = node.maxsize) +
   labs(color = "m") +
+  coord_equal() +
+  theme_graph(base_family = "Helvetica", base_size = 10) +
   guides(size = FALSE)
 
 #' Composition is more stable at low depth and high temperature
 subplots$knn <- ggraph(lo) +
   geom_edge_link2(aes(colour = node.mean.knn), show.legend = FALSE) +
   geom_node_point(aes(size = size, color = mean.knn)) +
-  scale_color_distiller(palette = "Blues") +
-  scale_edge_color_distiller(palette = "Blues") +
+  scale_color_distiller(palette = "Greys") +
+  scale_edge_color_distiller(palette = "Greys") +
+  scale_size_area(max_size = node.maxsize) +
   labs(color = "mean\nkNN") +
+  coord_equal() +
+  theme_graph(base_family = "Helvetica", base_size = 10) +
   guides(size = FALSE)
 
 #' Local kNN minima and basins of attraction
@@ -132,11 +141,14 @@ subplots$basins <- ggraph(lo) +
   geom_node_point(aes(size = size),
                   data = filter(get_nodes()(lo), is.na(basin)),
                   color = "grey") +
+  scale_size_area(max_size = node.maxsize) +
   geom_node_point(aes(size = size, color = basin),
                   data = filter(get_nodes()(lo), !is.na(basin))) +
   geom_node_point(aes(size = size),
                   data = filter(get_nodes()(lo), is.extremum),
                   shape = 21) +
+  theme_graph(base_family = "Helvetica") +
+  coord_equal() +
   guides(size = FALSE, color = guide_legend(ncol = 2))
 
 #' Dynamics by basin
@@ -156,18 +168,28 @@ pseries <- ggplot(p2basin, aes(x = month, y = basin)) +
   labs(fill = "calendar\nmonth")
 pdistribs <- p2basin[, .(N = sum(N)), by = .(site, depth, cal.month, basin)] %>%
   .[, frac := N / sum(N), by = .(site, depth, cal.month)] %>%
-  ggplot(aes(x = cal.month, y = frac)) +
-  geom_col(aes(fill = basin)) +
-  facet_wrap(~ site + depth, nrow = 4) +
-  scale_x_continuous(breaks = seq(1, 12, by = 2),
-                     labels = as.character(seq(1, 12, by = 2))) +
-  labs(x = "calendar month", y = "fraction samples")
-plot_grid(pseries, pdistribs, nrow = 2, labels = "AUTO", align = "hv",
-          axis = "lt")
+  split(by = "site") %>%
+  mapply(function(site, l) {
+    ggplot(site, aes(x = cal.month, y = frac)) +
+    geom_col(aes(fill = basin), color = "black", size = 0.1, width = 1) +
+    facet_wrap(~ depth, nrow = 4) +
+    scale_x_continuous(breaks = seq(1, 12, by = 2),
+                       labels = as.character(seq(1, 12, by = 2))) +
+    theme(legend.position = "none") +
+    labs(title = l) +
+    scale_y_continuous(breaks = c(0, 0.5, 1)) +
+    labs(x = "calendar month", y = "fraction samples")
+  }, site = ., l = c("BATS", "HOT"), SIMPLIFY = FALSE) %>%
+  plot_grid(plotlist = ., ncol = 2, align = "h",
+            axis = "l", vjust = 0.2)
+# pad <- plot_grid(pseries, pdistribs, nrow = 2, labels = "AUTO", align = "hv",
+#           axis = "lt")
 
-plot_grid(plotlist = subplots, labels = "AUTO", nrow = 2)
-save_plot(paste0(figs.dir, "paper/fig4.pdf"), last_plot(), base_width = 4,
-          nrow = 2, ncol = 2)
+plot_grid(plot_grid(plotlist = subplots, nrow = 2, labels = "AUTO"),
+          pdistribs, labels = c("", "E"), nrow = 2,
+          rel_heights = c(2, 1))
+save_plot(paste0(figs.dir, "paper/fig4.pdf"), last_plot(), base_width = 8,
+          nrow = 2)
 
 
 # other figures -----------------------------------------------------------
