@@ -128,12 +128,12 @@ subplots[["fstate"]] <- ggraph(lo) +
 subplots[["knn"]] <- ggraph(lo) +
   geom_edge_link2(aes(colour = node.mean.knn), show.legend = FALSE) +
   geom_node_point(aes(size = size, color = mean.knn)) +
-  scale_color_distiller(palette = "Blues") +
+  scale_color_distiller(palette = "Greys") +
   labs(color = "mean\nkNN") +
-  guides(size = FALSE) +
   theme_graph(base_family = "Helvetica") +
   coord_equal() +
-  scale_edge_color_distiller(palette = "Blues")
+  guides(size = FALSE) +
+  scale_edge_color_distiller(palette = "Greys")
 
 #' Local mean kNN minima and basins:
 ej <- get_edges()(lo) %>%
@@ -152,8 +152,9 @@ subplots[["basins"]] <- ggraph(lo) +
   geom_node_point(aes(size = size), data = filter(lo, is.extremum),
                   shape = 21, color = "black") +
   coord_equal() +
-  theme_graph(base_family = "Helvetica") +
-  theme(legend.position = "none")
+  guides(size = FALSE) +
+  theme_graph(base_family = "Helvetica") #+
+  # theme(legend.position = "none")
 
 #' # Subject dynamics
 
@@ -182,34 +183,49 @@ p2basin[, time.unit := sapply(diagnosis, function(x) {
   if (x == "diarrhea") "hour" else "day"
 })]
 p2basin[, i := rank(basin), by = .(subject, id)]
-theme_set(theme_cowplot(font_size = 10) +
-  theme(axis.text.y = element_blank(), axis.title.y = element_blank(),
-        axis.ticks.y = element_blank(), panel.spacing.y = unit(0, "points"))
+theme_set(theme_cowplot(font_size = 10) #+
+  # theme(axis.text.y = element_blank(), axis.title.y = element_blank(),
+  #       axis.ticks.y = element_blank(), panel.spacing.y = unit(0, "points"))
   )
+setkey(p2basin, subject)
 subplots$basin.series <- p2basin %>%
+  # .[c("A", "C", "F", "G")] %>%
   ggplot(aes(x = time, y = basin)) +
   geom_tile(aes(fill = basin)) +
-  facet_grid(subject ~ diagnosis, scales = "free_x") +
+  facet_grid(subject ~ ., scales = "free_y", switch = "y") +
   theme(axis.ticks.y = element_blank()) +
-  labs(x = "time (hour/day)") +
+  labs(x = "hour") +
   guides(fill = guide_legend(nrow = 1)) +
-  theme(legend.position = "none")
+  scale_color_hue(drop = FALSE) +
+  theme(legend.position = "none", axis.text.y = element_blank(),
+        axis.title.y = element_blank(), strip.placement = "outside")
 d2basin <- p2basin[, .(N = sum(N)), by = .(subject, diagnosis, basin)]
 d2basin[, frac := N / sum(N), by = .(subject, diagnosis)]
-subplots$basin.distribs <- d2basin %>%
+setkey(d2basin, diagnosis)
+subplots$basin.distribs <- d2basin["diarrhea"] %>%
   ggplot(aes(x = subject, y = frac)) +
   geom_col(aes(fill = basin)) +
   coord_flip() +
-  facet_grid(subject ~ diagnosis, scales = "free_y") +
-  theme(legend.position = "bottom") +
-  guides(fill = guide_legend(nrow = 1, direction = "horizontal",
-                             label.position = "bottom")) +
+  scale_fill_hue(drop = FALSE) +
+  facet_grid(subject ~ ., scales = "free_y") +
+  # scale_x_discrete(limits = rev(sort(unique(d2basin$subject)))) +
+  theme(legend.position = "none", axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(), axis.title.y = element_blank(),
+        strip.background = element_blank(), strip.text = element_blank()) +
+  # guides(fill = guide_legend(nrow = 1, direction = "horizontal",
+  #                            label.position = "bottom")) +
   labs(y = "fraction samples") #+
-plot_grid(plot_grid(subplots$fstate, subplots$knn,
-                    subplots$basins, subplots$basin.distribs,
-                    nrow = 2, labels = "AUTO"),
-          subplots$basin.series, ncol = 1, rel_heights = c(4, 1.5),
-          labels = c("", "E"))
+# plot_grid(plot_grid(subplots$fstate, subplots$knn,
+#                     subplots$basins, subplots$basin.distribs,
+#                     nrow = 2, labels = "AUTO"),
+#           subplots$basin.series, ncol = 1, rel_heights = c(4, 1.5),
+#           labels = c("", "E"), vjust = c(0, 0))
+plot_grid(subplots$fstate, subplots$knn, subplots$basins,
+          plot_grid(subplots$basin.series, subplots$basin.distribs, ncol = 2,
+                    rel_widths = c(1, 1), align = "hv", axis = "lt"),
+          labels = "AUTO",
+          hjust = c(-0.5, -0.5, -0.5, 0.5),
+          vjust = c(1.5, 1.5, 1.5, 0))
 save_plot(paste0(figs.dir, "paper/fig2.pdf"),
           last_plot(),
           base_aspect_ratio = 1.3, base_width = 8,
