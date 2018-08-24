@@ -14,7 +14,6 @@ source(paste0(util.dir, "load_cholera_data.R"))
 source("vertex.2.points.R")
 source("dist2knn.R")
 source("mapper.2.igraph.R")
-source("plot.mapper.R")
 source("sample.subgraphs.R")
 source("assign.basins.R")
 
