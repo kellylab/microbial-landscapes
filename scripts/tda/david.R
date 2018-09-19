@@ -13,7 +13,6 @@ library(cowplot)
 source("dist2knn.R")
 source("vertex.2.points.R")
 source("mapper.2.igraph.R")
-source("plot.mapper.R")
 source("assign.basins.R")
 scripts.dir <- "../r/"
 figs.dir <- "../../figures/tda/"
@@ -132,8 +131,8 @@ subplots$knn <- ggraph(lo) +
   geom_edge_link2(aes(colour = node.mean.knn), show.legend = FALSE) +
   geom_node_point(aes(size = size, color = mean.knn)) +
   labs(color = "mean\nkNN") +
-  scale_color_distiller(palette = "Blues") +
-  scale_edge_colour_distiller(palette = "Blues") +
+  scale_color_distiller(palette = "Greys") +
+  scale_edge_colour_distiller(palette = "Greys") +
   theme_graph(base_family = "Helvetica") +
   coord_equal() +
   guides(size = FALSE)
@@ -179,7 +178,7 @@ pseries <- sample.basins %>%
   #            color = "grey50", shape = 21, size = 1) +
   # geom_point(aes(color = event),
   #            data = function(dt) filter(dt, !is.na(basin)), size = 1) +
-  geom_tile(data = function(dt) filter(dt, is.na(basin)), fill = "grey") +
+  geom_tile(data = function(dt) filter(dt, is.na(basin)), fill = "grey50") +
   geom_tile(aes(fill = event), data = function(dt) filter(dt, !is.na(basin))) +
   scale_y_discrete(limits = basins) +
   scale_fill_brewer(palette = "Set1") +

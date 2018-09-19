@@ -115,7 +115,7 @@ subplots$depth <- ggraph(lo) +
   labs(color = "m") +
   coord_equal() +
   theme_graph(base_family = "Helvetica", base_size = 10) +
-  guides(size = FALSE)
+  guides(size = FALSE, color = guide_colorbar(reverse = TRUE))
 
 #' Composition is more stable at low depth and high temperature
 subplots$knn <- ggraph(lo) +
