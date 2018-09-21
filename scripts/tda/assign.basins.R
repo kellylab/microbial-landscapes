@@ -47,12 +47,12 @@ assign.basins <- function(tbl_graf, fn, down = TRUE, ignore.singletons = TRUE,
                  map = min2basin)
   tbl_graf <- tbl_graf %>%
     activate(nodes) %>%
-    mutate(basin = as.character(v2min[name]))
+    mutate(basin = v2min[name])
   if (ignore.singletons) {
     tbl_graf <- tbl_graf %>%
       group_by(basin) %>%
       mutate(is.extremum = if (n() > 1) is.extremum else FALSE,
-             newbasin = if (n() > 1) basin else NA_character_) %>%
+             newbasin = if (n() > 1) basin else NA) %>%
       ungroup %>%
       mutate(basin = newbasin) %>%
       mutate(newbasin = NULL)
@@ -61,5 +61,8 @@ assign.basins <- function(tbl_graf, fn, down = TRUE, ignore.singletons = TRUE,
     df <- as.data.frame(select(tbl_graf, vertex, is.extremum, basin))
     tbl_graf <- left_join(orig.graf, df, by = "vertex")
   }
+  tbl_graf %>%
+    activate(nodes) %>%
+    mutate(basin, as.factor(basin))
   tbl_graf
 }
