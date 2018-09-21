@@ -1,0 +1,337 @@
+library(data.table)
+library(tidyverse)
+library(data.table)
+library(philentropy)
+library(TDAmapper)
+library(ggraph)
+library(igraph)
+library(cowplot)
+
+
+util.dir <- "../r/"
+figs.dir <- "../../figures/tda/"
+
+source("vertex.2.points.R")
+source("dist2knn.R")
+source("sample.subgraphs.R")
+source("assign.basins.R")
+
+#' # Cholera -----------------------------------------------------------------
+
+source(paste0(util.dir, "load_cholera_data.R"))
+
+gordon[, freq := count / sum(count), by = sample]
+gordon.samples <- unique(gordon[, .(sample, subject, diagnosis, id, hour)])
+gordon.samples[, idx := frank(hour), by = subject]
+gordon.samples[, progression := idx / max(idx), by = subject]
+distribs <- dcast(gordon, sample ~ otu, value.var = "freq", fill = 0)
+sample.names <- distribs$sample
+distribs <- as.matrix(distribs[, -1])
+
+# import js distance 
+jsd <- fread("jsds/cholera.txt") # run make-jsds-cholera.R to precompute
+js.dist <- dcast(jsd, sample.x ~ sample.y, value.var = "jsd")
+rn <- js.dist$sample.x
+js.dist <- sqrt(as.matrix(js.dist[, -1]))
+rownames(js.dist) <- rn
+js.dist <- js.dist[sample.names, sample.names]
+
+#' ## K-nearest neighbor density
+k <- round(nrow(gordon.samples) / 10)
+knn <- dist2knn(js.dist, k = k)
+gordon.samples[, knn := knn[sample]]
+ggplot(gordon.samples, aes(x = progression, y = knn)) +
+  geom_smooth() +
+  geom_point(aes(color = diagnosis)) +
+  facet_wrap(~ subject)
+
+#' Diarrhea samples only showing disease duration:
+setkey(gordon.samples, diagnosis)
+theme_set(theme_cowplot())
+ggplot(gordon.samples["diarrhea"], aes(x = hour, y = knn)) +
+  geom_smooth() +
+  geom_point() +
+  facet_wrap(~ subject)
+
+#' # MDS 2D
+mds2 <- cmdscale(js.dist, 2, eig = TRUE)
+mds2$GOF # lossy
+
+#' MDS sketch suggests existence of at least 2 clusters.
+plot(mds2$points)
+
+#' MDS rank evens out density but preserves some of the patchiness
+rk.mds <- apply(mds2$points, 2, rank)
+plot(rk.mds)
+
+# mapper call -------------------------------------------------------------
+
+
+po <- 70
+ni <- c(10, 10)
+mpr <- mapper2D(js.dist, filter_values = list(rk.mds[,1], rk.mds[,2]),
+                percent_overlap = po,
+                num_intervals = ni)
+v2p <- vertex.2.points(mpr$points_in_vertex)
+v2p <- merge(v2p, gordon.samples, by.x = "point.name", by.y = "sample")
+v2p[, frac := 1 / .N, by = point]
+vertices <- v2p[, .(mean.knn = mean(knn),
+                    f.state = sum(diagnosis == "diarrhea") / .N,
+                    mean.t = mean(hour),
+                    size = .N),
+                by = .(vertex, vertex.name)]
+setorder(vertices, vertex)
+graf <- mapper.2.igraph(mpr) %>%
+  as_tbl_graph %>%
+  activate(nodes) %>%
+  left_join(vertices, by = c("name" = "vertex.name"))
+# assign minima and basins
+graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
+graf <- graf %>%
+  mutate(basin = factor(basin,
+                        levels = as.character(
+                          sort(
+                            as.numeric(
+                              unique(basin)
+                              ), na.last = TRUE
+                            )
+                          )
+                        )
+         )
+
+
+# draw paper figures----------------------------------------------------------
+
+
+subplots <- list() # list of subplots
+
+set.seed(1)
+lo <- create_layout(graf, "fr", niter = 1000)
+# color by fraction samples marked diarrhea
+theme_set(theme_graph(base_family = "Helvetica"))
+subplots[["fstate"]] <- ggraph(lo) +
+  geom_edge_link2(aes(colour = node.f.state), show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = f.state)) +
+  scale_color_gradient2(midpoint = 0.5, low = "blue", high = "red") +
+  scale_edge_colour_gradient2(midpoint = 0.5, low = "blue", high = "red") +
+  labs(color = "fraction\ndiarrhea") +
+  guides(size = FALSE) +
+  coord_equal() +
+  theme_graph(base_family = "Helvetica", base_size = 10)
+subplots[["knn"]] <- ggraph(lo) +
+  geom_edge_link2(aes(colour = node.mean.knn), show.legend = FALSE) +
+  geom_node_point(aes(size = size, color = mean.knn)) +
+  scale_color_distiller(palette = "Greys") +
+  labs(color = "mean\nkNN") +
+  theme_graph(base_family = "Helvetica") +
+  coord_equal() +
+  guides(size = FALSE) +
+  scale_edge_color_distiller(palette = "Greys")
+
+#' Local mean kNN minima and basins:
+ej <- get_edges()(lo) %>%
+  mutate(in.basin = node1.basin == node2.basin & !is.na(node1.basin) &
+           !is.na(node2.basin))
+subplots[["basins"]] <- ggraph(lo) +
+  geom_edge_link0(colour = "grey50", data = filter(ej, !in.basin)) +
+  geom_edge_link(aes(colour = node1.basin),
+                 data = filter(ej, in.basin),
+                 show.legend = FALSE) +
+  geom_node_point(aes(size = size),
+                  data = filter(get_nodes()(lo), is.na(basin)),
+                  color = "grey50") +
+  geom_node_point(aes(size = size, color = basin),
+                  data = filter(get_nodes()(lo), !is.na(basin))) +
+  geom_node_point(aes(size = size), data = filter(lo, is.extremum),
+                  shape = 21, color = "black") +
+  coord_equal() +
+  guides(size = FALSE) +
+  theme_graph(base_family = "Helvetica") #+
+  # theme(legend.position = "none")
+
+#' # Subject dynamics
+
+#' ## Subject dynamics in terms of basins
+theme_set(theme_cowplot())
+basins <- as.data.frame(activate(graf, nodes))$basin %>%
+  unique %>%
+  as.numeric %>%
+  sort(na.last = TRUE) %>%
+  as.character
+p2basin <- graf %>%
+  activate(nodes) %>%
+  as.data.frame %>%
+  select(vertex, basin) %>%
+  merge(v2p, by = "vertex") %>%
+  as.data.table %>%
+  .[, .N, by = .(subject, diagnosis, id, hour, basin)]
+p2basin[, time := mapply(function(diagnosis, id, hour) {
+  if (diagnosis == "diarrhea") {
+    hour
+  } else {
+    as.numeric(strsplit(id, "d")[[1]][[2]])
+  }
+}, diagnosis = diagnosis, id = id, hour = hour)]
+p2basin[, time.unit := sapply(diagnosis, function(x) {
+  if (x == "diarrhea") "hour" else "day"
+})]
+p2basin[, i := rank(basin), by = .(subject, id)]
+theme_set(theme_cowplot(font_size = 10) #+
+  # theme(axis.text.y = element_blank(), axis.title.y = element_blank(),
+  #       axis.ticks.y = element_blank(), panel.spacing.y = unit(0, "points"))
+  )
+setkey(p2basin, subject)
+subplots$basin.series <- p2basin %>%
+  # .[c("A", "C", "F", "G")] %>%
+  ggplot(aes(x = time, y = basin)) +
+  geom_tile(aes(fill = basin)) +
+  facet_grid(subject ~ ., scales = "free_y", switch = "y") +
+  theme(axis.ticks.y = element_blank()) +
+  labs(x = "hour") +
+  guides(fill = guide_legend(nrow = 1)) +
+  scale_color_hue(drop = FALSE) +
+  theme(legend.position = "none", axis.text.y = element_blank(),
+        axis.title.y = element_blank(), strip.placement = "outside")
+d2basin <- p2basin[, .(N = sum(N)), by = .(subject, diagnosis, basin)]
+d2basin[, frac := N / sum(N), by = .(subject, diagnosis)]
+setkey(d2basin, diagnosis)
+subplots$basin.distribs <- d2basin["diarrhea"] %>%
+  ggplot(aes(x = subject, y = frac)) +
+  geom_col(aes(fill = basin)) +
+  coord_flip() +
+  scale_fill_hue(drop = FALSE) +
+  facet_grid(subject ~ ., scales = "free_y") +
+  # scale_x_discrete(limits = rev(sort(unique(d2basin$subject)))) +
+  theme(legend.position = "none", axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(), axis.title.y = element_blank(),
+        strip.background = element_blank(), strip.text = element_blank()) +
+  # guides(fill = guide_legend(nrow = 1, direction = "horizontal",
+  #                            label.position = "bottom")) +
+  labs(y = "fraction samples") #+
+# plot_grid(plot_grid(subplots$fstate, subplots$knn,
+#                     subplots$basins, subplots$basin.distribs,
+#                     nrow = 2, labels = "AUTO"),
+#           subplots$basin.series, ncol = 1, rel_heights = c(4, 1.5),
+#           labels = c("", "E"), vjust = c(0, 0))
+plot_grid(subplots$fstate, subplots$knn, subplots$basins,
+          plot_grid(subplots$basin.series, subplots$basin.distribs, ncol = 2,
+                    rel_widths = c(1, 1), align = "hv", axis = "lt"),
+          labels = "AUTO",
+          hjust = c(-0.5, -0.5, -0.5, 0.5),
+          vjust = c(1.5, 1.5, 1.5, 0))
+save_plot(paste0(figs.dir, "paper/fig2.pdf"),
+          last_plot(),
+          base_aspect_ratio = 1.3, base_width = 8,
+          ncol = 1, nrow = 2)
+
+
+# other figures -----------------------------------------------------------
+
+
+#' 2D probability mass over the Mapper graph:
+# theme_set(theme_graph(base_family = "Helvetica"))
+# density.plots <- v2p %>%
+#   split(by = c("subject", "diagnosis")) %>%
+#   lapply(function(sd, lo) {
+#     sd <- sd[, .N, by = vertex]
+#     vs <- sd$vertex
+#     nodes <- get_nodes()(lo)
+#     color <- slice(nodes, vs)
+#     color <- merge(color, sd, by = "vertex")
+#     uncolor <- filter(nodes, !(vertex %in% vs))
+#     ggraph(lo) +
+#       geom_edge_link0(colour = "grey") +
+#       geom_node_point(aes(size = size), data = uncolor, color = "grey") +
+#       geom_node_point(aes(size = size, color = N), data = color,
+#                       alpha = 0.8) +
+#       guides(size = FALSE) +
+#       scale_color_distiller(palette = "Spectral") +
+#       coord_equal()
+#   }, lo = lo)
+# density.plots <- density.plots[sort(names(density.plots))]
+# plot_grid(plotlist = density.plots, labels = names(density.plots),
+#           ncol = 4, align = "hv")
+# save_plot(paste0(figs.dir, "cholera-2d-probability-mass.pdf"),
+#           last_plot(), ncol = 4, nrow = 4, base_height = 3)
+
+#' ## JSD between subject-diagnosis states
+m <- dcast(d2basin, subject + diagnosis ~ basin, value.var = "frac", fill = 0)
+rn <- sort(paste(m$diagnosis, m$subject, sep = "."))
+jsd <- JSD(as.matrix(m[, -c(1, 2)]))
+rownames(jsd) <- rn
+colnames(jsd) <- rn
+theme_set(theme_cowplot())
+z <- function(x) (x - mean(x)) / sd(x)
+melt(jsd, varnames = c("state.i", "state.j"), value.name = "jsd") %>%
+  ggplot(aes(x = state.i, y = state.j)) +
+  geom_tile(aes(fill = z(jsd))) +
+  coord_equal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  scale_fill_gradient2()
+
+
+#  subject trajectories ----------------------------------------------------
+#graf <- graf %>%
+#  activate(nodes) %>%
+#  mutate(x = lo$x, y = lo$y)
+#subject.phases <- v2p %>%
+#  split(by = "subject") %>%
+#  lapply(function(dt, graf) {
+#    max.i <- max(dt$idx)
+#    v <- dt[, .(progression = mean(progression)), by = .(vertex, vertex.name)]
+#    sg <- graf %>%
+#      slice(v$vertex)
+#    sg %>%
+#      activate(nodes) %>%
+#      left_join(v, by = c("name" = "vertex.name"))
+#
+#  }, graf = graf)
+#subject.phase.plots <- mapply(function(g, subj, global) {
+#  d <- as.data.frame(g)
+#  plot.mapper(global, aes_(size = ~size), labs(title = subj), color = "grey") +
+#    geom_point(aes(x = x, y = y, size = size, color = progression), data = d) +
+#    scale_color_distiller(palette = "Spectral", direction = 1)
+#}, g = subject.phases, subj = names(subject.phases),
+#MoreArgs = list(global = lo), SIMPLIFY = FALSE)
+#for (i in seq_along(subject.phase.plots)) {
+#  fn <- paste0("cholera-subject-trajectories/phases/",
+#               names(subject.phase.plots)[i], ".png")
+#  save_plot(fn, subject.phase.plots[[i]], base_height = 6)
+#}
+#
+##' ## "Top" arc progressions
+#cl1 <- c("A", "F", "G")
+#plot_grid(plotlist = subject.phase.plots[cl1], labels = cl1)
+
+#' ## Other
+cl.other <- c("B", "C", "D", "E")
+plot_grid(plotlist = subject.phase.plots[cl.other], labels = cl.other)
+
+# frames ------------------------------------------------------------------
+
+
+sample.sgs <- v2p %>%
+  split(by = "point.name") %>%
+  lapply(function(s, graf) {
+    slice(graf, s$vertex)
+  }, graf = graf)
+sample.frames <- mapply(function(sg, sample, state, graf) {
+  if (state == "diarrhea") {
+    color <- "red"
+  } else {
+    color <- "blue"
+  }
+  d <- as.data.frame(sg)
+  plot.mapper(graf, aes_(size = ~size), labs(title = sample), color = "grey") +
+    geom_point(aes(x = x, y = y, size = size), data = d, color = color)
+}, sg = sample.sgs[gordon.samples$sample], sample = gordon.samples$sample,
+state = gordon.samples$diagnosis,
+MoreArgs = list(graf = lo), SIMPLIFY = FALSE)
+setorder(gordon.samples, subject, idx)
+for (i in seq(nrow(gordon.samples))) {
+  fn <- paste0("cholera-subject-trajectories/frames/",
+               gordon.samples[i, subject], gordon.samples[i, idx],
+               ".png")
+  save_plot(fn, sample.frames[[gordon.samples[i, sample]]])
+}
+
