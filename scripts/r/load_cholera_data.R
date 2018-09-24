@@ -18,5 +18,5 @@ gordon[, hour := {
     }
   }, di.max = di.max)
 }, by = subject]
-
 gordon[, sample := paste(subject, diagnosis, id, sep = "_")]
+gordon.samples <- unique(gordon[, .(sample, subject, diagnosis, id, hour)])

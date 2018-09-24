@@ -15,6 +15,7 @@ util.dir <- "../r/"
 jsd.dir <- "jsds/"
 figs.dir <- "../../figures/tda/"
 output.dir <- "../../output/mapper/"
+scripts.dir <- "../r/"
 
 source("vertex.2.points.R")
 source("dist2knn.R")
@@ -22,7 +23,7 @@ source("sample.subgraphs.R")
 source("assign.basins.R")
 source("mapper.2.igraph.R")
 
-write.graph <- function(tbl_graph, directory) {
+write.graph <- function(tbl_graph, v2p, directory) {
   if (!dir.exists(directory)) {
     dir.create(directory)
   }
@@ -36,6 +37,8 @@ write.graph <- function(tbl_graph, directory) {
     as.data.table %>%
     fwrite(paste0(output.dir, paste0(directory, "edges.txt")),
                   sep = "\t", na = "NA")
+  names(v2p) <- c("point", "vertex")
+  fwrite(v2p, paste0(directory, "/vertices-to-points.txt"), sep = "\t")
 }
 
 # cholera -----------------------------------------------------------------
@@ -106,7 +109,7 @@ graf <- mapper.2.igraph(mpr) %>%
   left_join(vertices, by = c("name" = "vertex.name"))
 # assign minima and basins
 graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
-write.graph(graf, paste0(output.dir, "cholera/"))
+write.graph(graf, v2p[, .(point.name, vertex)], paste0(output.dir, "cholera/"))
 
 
 # david -------------------------------------------------------------------
@@ -177,8 +180,67 @@ graf <- graf %>%
 
 #' Find basins of attraction:
 graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
-write.graph(graf, paste0(output.dir, "david/"))
+write.graph(graf, v2p[, .(point.name, vertex)], paste0(output.dir, "david/"))
 
 # prochloroccoccus --------------------------------------------------------
 
 
+month.2.phase <- function(month) {
+  (month - 3) %% 12 / 12
+}
+
+source(paste0(scripts.dir, "load-prochlorococcus-data.R"))
+jsds <- fread(paste0(jsd.dir, "prochlorococcus.txt"))
+jsds[, distance := sqrt(jsd)]
+dist.mat <- reshape2::acast(jsds, sample.x ~ sample.y, value.var = "distance")
+samples <- unique(prochlorococcus[, -c("ecotype", "abundance")])
+samples[, phase := month.2.phase(cal.month)]
+k <- floor(nrow(samples) / 10)
+knn <- dist2knn(dist.mat, k)
+hist(knn)
+set(samples, NULL, "knn", knn[samples$sample])
+mds <- cmdscale(dist.mat, eig = TRUE) # 2D
+
+#' GOF is good, but we find that samples are very unevenly distributed across
+#' the 2D MDS-space, which is bad for Mapper:
+mds$GOF # not too bad actually
+plot(mds$points)
+
+#' Converting to rank alleviates the problem somewhat.
+#' Marginal distributions will be uniform, by definition.
+rk.mds <- apply(mds$points, 2, rank, ties.method = "first")
+plot(rk.mds)
+
+#' Mapper call:
+po <- 60
+ni <- c(20, 20)
+nb <- 10
+ftr <- list(rk.mds[, 1], rk.mds[, 2])
+mpr <- mapper2D(dist.mat, ftr,
+                percent_overlap = po, num_intervals = ni,
+                num_bins_when_clustering = nb)
+v2p <- vertex.2.points(mpr$points_in_vertex)
+v2p$sample <- rownames(dist.mat)[v2p$point]
+setkey(v2p, sample)
+setkey(samples, sample)
+v2p <- samples[v2p]
+v2p[, depth := as.numeric(depth)]
+vertices <- v2p[, .(size = .N,
+                    f.bats = sum(site == "bats") / .N,
+                    mean.depth = mean(depth, na.rm = TRUE),
+                    mean.temp = mean(temp, na.rm = TRUE),
+                    mean.sal = mean(sal, na.rm = TRUE),
+                    mean.calmonth = mean(cal.month, na.rm = TRUE),
+                    median.depth = median(depth, na.rm = TRUE),
+                    median.temp = median(temp, na.rm = TRUE),
+                    median.sal = median(sal, na.rm = TRUE),
+                    mean.knn = mean(knn, na.rm = TRUE)
+                    ),
+                by = .(vertex, vertex.name)]
+graf <- mapper.2.igraph(mpr) %>%
+  as_tbl_graph %>%
+  left_join(vertices, by = c("name" = "vertex.name"))
+graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
+graf <- mutate(graf, basin = as.factor(basin))
+write.graph(graf, v2p[, .(point.name, vertex)],
+            paste0(output.dir, "prochloroccoccus/"))
