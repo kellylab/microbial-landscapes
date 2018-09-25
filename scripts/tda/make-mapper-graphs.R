@@ -124,9 +124,7 @@ if (!file.exists(jsd.file)) {
   source("make-jsds-david.R")
 }
 jsds <- fread(jsd.file)
-js.dist <- dcast(jsds, sample.x ~ sample.y, value.var = "jsd") %>%
-  column_to_rownames("sample.x") %>%
-  data.matrix(rownames.force = TRUE) %>%
+js.dist <- reshape2::acast(jsds, sample.x ~ sample.y, value.var = "jsd") %>%
   sqrt
 k <- round(nrow(samples) / 10) # calculate k nearest neighbors
 kNN <- dist2knn(js.dist, k)
@@ -159,7 +157,6 @@ rk.mds <- apply(mds2d$points, 2, rank, ties.method = "first")
 plot(rk.mds)
 
 # mapper call
-
 ftr <- list(rk.mds[, 1], rk.mds[, 2])
 ni <- c(20, 20)
 po <- 70
