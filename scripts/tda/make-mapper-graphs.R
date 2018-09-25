@@ -243,4 +243,4 @@ graf <- mapper.2.igraph(mpr) %>%
 graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
 graf <- mutate(graf, basin = as.factor(basin))
 write.graph(graf, v2p[, .(point.name, vertex)],
-            paste0(output.dir, "prochloroccoccus/"))
+            paste0(output.dir, "prochlorococcus/"))
