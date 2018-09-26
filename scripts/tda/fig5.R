@@ -62,10 +62,18 @@ david.mpr <- read.mapper.graph(paste0(mapper.dir, "david/"))
 david.v2p <- merge.mpr.samples(david.mpr, david.samples)
 setnames(david.v2p, c("subject.x", "subject.y"), c("frac.a", "subject")) #KLUDGE
 david.persistence <- david.v2p %>%
-  split(by = "subject") %>%
+  split(by = c("subject", "event")) %>%
   lapply(function(df) basin.persistence(df$basin, df$day, scale = TRUE)) %>%
-  rbindlist(idcol = "subject") %>%
+  rbindlist(idcol = "subject.event") %>%
+  .[, c("subject", "event") := tstrsplit(subject.event, "\\.")] %>%
+  .[, subject.event := NULL] %>%
   .[, basin := as.factor(as.numeric(basin))]
+setkey(david.persistence, subject)
+david.persistence["B"] %>%
+  .[!is.na(basin)] %>%
+  ggplot(aes(x = delta.t, y = f, color = basin)) +
+  geom_smooth(aes(fill = basin)) +
+  facet_wrap(~ event)
 pdavid <- ggplot(david.persistence[!is.na(basin)],
                  aes(x = delta.t, y = f, color = basin)) +
   geom_smooth(aes(fill = basin)) +

@@ -22,6 +22,7 @@ source("dist2knn.R")
 source("sample.subgraphs.R")
 source("assign.basins.R")
 source("mapper.2.igraph.R")
+source("is.singleton.R")
 
 write.graph <- function(tbl_graph, v2p, directory) {
   if (!dir.exists(directory)) {
@@ -158,8 +159,9 @@ plot(rk.mds)
 
 # mapper call
 ftr <- list(rk.mds[, 1], rk.mds[, 2])
-ni <- c(20, 20)
-po <- 70
+# ftr <- list(mds2d$points[, 1], mds2d$points[, 2])
+ni <- c(30, 30)
+po <- 50
 mpr <- mapper2D(js.dist, ftr, num_intervals = ni, percent_overlap = po)
 v2p <- vertex.2.points(mpr$points_in_vertex)
 v2p <- merge(v2p, samples, by.x = "point.name", by.y = "sample")
@@ -174,10 +176,46 @@ graf <- graf %>%
   as_tbl_graph %>%
   activate(nodes) %>%
   left_join(vertices, by = c("name" = "vertex.name"))
+graf <- graf %>%
+  mutate(membership = components(.)$membership) %>%
+  mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
 
 #' Find basins of attraction:
-graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
+graf <- graf %>%
+  activate(nodes) %>%
+  mutate(scaled.knn = mean.knn / size)
+graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE,
+                      giant.only = FALSE) %>%
+  activate(nodes) %>%
+  mutate(basin = mapply(function(b, x) if (x) NA else b,
+                        b = basin, x = in.singleton)) %>%
+  mutate(is.extremum = mapply(function(b, x) if (x) NA else b,
+                        b = is.extremum, x = in.singleton))
 write.graph(graf, v2p[, .(point.name, vertex)], paste0(output.dir, "david/"))
+set.seed(2)
+lo <- create_layout(graf, "fr", niter = 1000)
+ggraph(graf, "manual", node.positions = lo[, c("x", "y")]) +
+  geom_edge_link0() +
+  geom_node_point(aes(color = subject, size = size),
+                  data = function(df) filter(df, in.singleton),
+                  fill = "white", shape = 21) +
+  geom_node_point(aes(fill = subject, size = size),
+                  data = function(df) filter(df, !in.singleton), shape = 21) +
+  scale_color_distiller(palette = "Spectral") +
+  scale_fill_distiller(palette = "Spectral") +
+  theme_graph() +
+  coord_equal()
+ggraph(graf, "manual", node.positions = lo[, c("x", "y")]) +
+  geom_edge_link0() +
+  geom_node_point(aes(size = size),
+                  data = function(df) filter(df, in.singleton),
+                  fill = "white", shape = 21) +
+  geom_node_point(aes(fill = as.factor(basin), size = size),
+                  data = function(df) filter(df, !in.singleton), shape = 21) +
+  geom_node_point(color = "black",
+                  data = function(df) filter(df, is.extremum)) +
+  theme_graph() +
+  coord_equal()
 
 # prochloroccoccus --------------------------------------------------------
 

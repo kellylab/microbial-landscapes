@@ -24,7 +24,7 @@ samples[, day := as.numeric(day)]
 # if haven't pre-computed jsds, run make-jsds-david.R
 jsds <- fread("jsds/david.txt")
 jsds[, distance := sqrt(jsd)]
-dist.mat <- dcast(jsds, sample.x ~ sample.y, value.var = "jsd")
+dist.mat <- dcast(jsds, sample.x ~ sample.y, value.var = "distance")
 sample.names <- dist.mat$sample.x
 dist.mat <- as.matrix(dist.mat[, -1])
 rownames(dist.mat) <- sample.names
