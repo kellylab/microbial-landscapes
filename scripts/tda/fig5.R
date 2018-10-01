@@ -325,16 +325,28 @@ david.persistence <- david.v2p %>%
   .[, c("subject", "event") := tstrsplit(subject.event, "\\.")] %>%
   .[, subject.event := NULL] %>%
   .[, basin := as.factor(as.numeric(basin))] %>% 
-  .[, N := .N, by = .(basin, delta.t, subject, event)]
+  # .[, N := .N, by = .(basin, delta.t, subject, event)]
+  .[, N := uniqueN(delta.t), by = .(basin, subject, event)]
 setkey(david.persistence, subject)
-david.persistence["B"] %>%
-  .[!is.na(basin)] %>%
-  ggplot(aes(x = delta.t, y = f, color = basin)) +
-  geom_smooth(aes(color = basin, fill = basin), 
-              data = function(df) filter(df, N <= 11)) +
-  # geom_smooth(aes(fill = basin), data = function(df) filter(df, N > 11)) +
-  coord_cartesian(ylim = c(0, 1)) +
-  facet_wrap(~ event, nrow = 3)
+pl <- lapply(split(david.persistence[!is.na(basin)], by = "subject"),
+          function(dt) {
+            dt %>%  
+              ggplot(aes(x = delta.t, y = f, color = basin)) + 
+              geom_point(data = function(df) filter(df, N <= 10),
+                          alpha = 0.5) +
+              geom_smooth(aes(color = basin, fill = basin),  
+                          data = function(df) filter(df, N > 10)) +  
+              scale_color_hue(drop = FALSE) +
+              scale_fill_hue(drop = FALSE) +
+              coord_cartesian(ylim = c(0, 1)) + 
+              labs(x = "interval (days)", y = "correlation") +
+              facet_wrap(~ event, ncol = 1) 
+            })
+plot_grid(pl[[1]] + theme(legend.position = "none"),
+          pl[[2]] + theme(legend.position = "none"),
+          get_legend(pl[[1]]),
+          nrow = 1, rel_widths = c(4, 4, 1), labels = c("A", "B", "")
+          )
 pdavid <- ggplot(david.persistence[!is.na(basin)],
                  aes(x = delta.t, y = f, color = basin)) +
   geom_smooth(aes(fill = basin)) +
