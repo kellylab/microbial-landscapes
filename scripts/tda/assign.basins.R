@@ -11,7 +11,7 @@
 #'
 #' @examples
 assign.basins <- function(tbl_graf, fn, down = TRUE, ignore.singletons = TRUE,
-                          giant.only = TRUE) {
+                          giant.only = FALSE) {
   library(tidygraph)
   library(igraph)
   source("local.extrema.R")

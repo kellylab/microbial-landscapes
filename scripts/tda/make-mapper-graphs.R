@@ -8,6 +8,7 @@ library(philentropy)
 library(TDAmapper)
 library(ggraph)
 library(igraph)
+library(tidygraph)
 library(cowplot)
 
 
@@ -15,6 +16,7 @@ util.dir <- "../r/"
 jsd.dir <- "jsds/"
 figs.dir <- "../../figures/tda/"
 output.dir <- "../../output/mapper/"
+if (!dir.exists(output.dir)) dir.create(output.dir, recursive = TRUE)
 scripts.dir <- "../r/"
 
 source("vertex.2.points.R")
@@ -22,7 +24,7 @@ source("dist2knn.R")
 source("sample.subgraphs.R")
 source("assign.basins.R")
 source("mapper.2.igraph.R")
-source("is.singleton.R")
+source("in.singleton.R")
 
 write.graph <- function(tbl_graph, v2p, directory) {
   if (!dir.exists(directory)) {
@@ -91,7 +93,7 @@ plot(rk.mds)
 
 # mapper call
 po <- 70
-ni <- c(10, 10)
+ni <- c(15, 15)
 mpr <- mapper2D(js.dist, filter_values = list(rk.mds[,1], rk.mds[,2]),
                 percent_overlap = po,
                 num_intervals = ni)
@@ -108,8 +110,27 @@ graf <- mapper.2.igraph(mpr) %>%
   as_tbl_graph %>%
   activate(nodes) %>%
   left_join(vertices, by = c("name" = "vertex.name"))
+theme_set(theme_graph(base_family = "Helvetica"))
+ggraph(graf, "fr", niter = 1000) +
+  geom_edge_link0() +
+  geom_node_point(aes(color = f.state)) +
+  scale_color_distiller(palette = "Spectral") +
+  coord_equal()
+graf <- graf %>%
+  mutate(membership = components(.)$membership) %>%
+  mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
 # assign minima and basins
-graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
+graf <- graf %>% mutate(scaled.knn = mean.knn / size)
+graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
+graf <- graf %>% 
+  mutate(basin = mapply(function(b, x) if (x) NA else b,
+                        b = basin, x = in.singleton)) %>%
+  mutate(is.extremum = mapply(function(b, x) if (x) NA else b,
+                        b = is.extremum, x = in.singleton))
+ggraph(graf, "fr", niter = 1000) +
+  geom_edge_link0() +
+  geom_node_point(aes(color = as.factor(basin))) +
+  coord_equal()
 write.graph(graf, v2p[, .(point.name, vertex)], paste0(output.dir, "cholera/"))
 
 
@@ -274,8 +295,9 @@ vertices <- v2p[, .(size = .N,
                 by = .(vertex, vertex.name)]
 graf <- mapper.2.igraph(mpr) %>%
   as_tbl_graph %>%
-  left_join(vertices, by = c("name" = "vertex.name"))
-graf <- assign.basins(graf, "mean.knn", ignore.singletons = TRUE)
+  left_join(vertices, by = c("name" = "vertex.name")) %>% 
+  mutate(scaled.knn = mean.knn / size)
+graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
 graf <- mutate(graf, basin = as.factor(basin))
 write.graph(graf, v2p[, .(point.name, vertex)],
             paste0(output.dir, "prochlorococcus/"))
