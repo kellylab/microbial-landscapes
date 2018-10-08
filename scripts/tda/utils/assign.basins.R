@@ -14,9 +14,9 @@ assign.basins <- function(tbl_graf, fn, down = TRUE, ignore.singletons = TRUE,
                           giant.only = FALSE) {
   library(tidygraph)
   library(igraph)
-  source("local.extrema.R")
-  source("gradient.graf.R")
-  source("get.giant.R")
+  # source("local.extrema.R")
+  # source("gradient.graf.R")
+  # source("get.giant.R")
   orig.graf <- tbl_graf
   if (giant.only) {
     tbl_graf <- get.giant(tbl_graf)

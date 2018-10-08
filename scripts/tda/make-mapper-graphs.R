@@ -12,19 +12,12 @@ library(tidygraph)
 library(cowplot)
 
 
-util.dir <- "../r/"
 jsd.dir <- "jsds/"
 figs.dir <- "../../figures/tda/"
 output.dir <- "../../output/mapper/"
 if (!dir.exists(output.dir)) dir.create(output.dir, recursive = TRUE)
 scripts.dir <- "../r/"
-
-source("vertex.2.points.R")
-source("dist2knn.R")
-source("sample.subgraphs.R")
-source("assign.basins.R")
-source("mapper.2.igraph.R")
-source("in.singleton.R")
+for (script in list.files("utils/", full.names = TRUE)) source(script)
 
 write.graph <- function(tbl_graph, v2p, directory) {
   if (!dir.exists(directory)) {
@@ -122,15 +115,11 @@ graf <- graf %>%
 # assign minima and basins
 graf <- graf %>% mutate(scaled.knn = mean.knn / size)
 graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
-graf <- graf %>% 
+graf <- graf %>%
   mutate(basin = mapply(function(b, x) if (x) NA else b,
                         b = basin, x = in.singleton)) %>%
   mutate(is.extremum = mapply(function(b, x) if (x) NA else b,
                         b = is.extremum, x = in.singleton))
-ggraph(graf, "fr", niter = 1000) +
-  geom_edge_link0() +
-  geom_node_point(aes(color = as.factor(basin))) +
-  coord_equal()
 write.graph(graf, v2p[, .(point.name, vertex)], paste0(output.dir, "cholera/"))
 
 
@@ -180,14 +169,13 @@ plot(rk.mds)
 
 # mapper call
 ftr <- list(rk.mds[, 1], rk.mds[, 2])
-# ftr <- list(mds2d$points[, 1], mds2d$points[, 2])
 ni <- c(30, 30)
 po <- 50
 mpr <- mapper2D(js.dist, ftr, num_intervals = ni, percent_overlap = po)
 v2p <- vertex.2.points(mpr$points_in_vertex)
 v2p <- merge(v2p, samples, by.x = "point.name", by.y = "sample")
 vertices <- v2p[, .(
-  subject = sum(subject == "A") / .N,
+  f.subject = sum(subject == "A") / .N,
   mean.knn = mean(kNN),
   size = .N
 ), by = .(vertex, vertex.name)]
@@ -213,30 +201,6 @@ graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE,
   mutate(is.extremum = mapply(function(b, x) if (x) NA else b,
                         b = is.extremum, x = in.singleton))
 write.graph(graf, v2p[, .(point.name, vertex)], paste0(output.dir, "david/"))
-set.seed(2)
-lo <- create_layout(graf, "fr", niter = 1000)
-ggraph(graf, "manual", node.positions = lo[, c("x", "y")]) +
-  geom_edge_link0() +
-  geom_node_point(aes(color = subject, size = size),
-                  data = function(df) filter(df, in.singleton),
-                  fill = "white", shape = 21) +
-  geom_node_point(aes(fill = subject, size = size),
-                  data = function(df) filter(df, !in.singleton), shape = 21) +
-  scale_color_distiller(palette = "Spectral") +
-  scale_fill_distiller(palette = "Spectral") +
-  theme_graph() +
-  coord_equal()
-ggraph(graf, "manual", node.positions = lo[, c("x", "y")]) +
-  geom_edge_link0() +
-  geom_node_point(aes(size = size),
-                  data = function(df) filter(df, in.singleton),
-                  fill = "white", shape = 21) +
-  geom_node_point(aes(fill = as.factor(basin), size = size),
-                  data = function(df) filter(df, !in.singleton), shape = 21) +
-  geom_node_point(color = "black",
-                  data = function(df) filter(df, is.extremum)) +
-  theme_graph() +
-  coord_equal()
 
 # prochloroccoccus --------------------------------------------------------
 
@@ -295,9 +259,12 @@ vertices <- v2p[, .(size = .N,
                 by = .(vertex, vertex.name)]
 graf <- mapper.2.igraph(mpr) %>%
   as_tbl_graph %>%
-  left_join(vertices, by = c("name" = "vertex.name")) %>% 
+  left_join(vertices, by = c("name" = "vertex.name")) %>%
   mutate(scaled.knn = mean.knn / size)
 graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
+graf <- graf %>%
+  mutate(membership = components(.)$membership) %>%
+  mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
 graf <- mutate(graf, basin = as.factor(basin))
 write.graph(graf, v2p[, .(point.name, vertex)],
             paste0(output.dir, "prochlorococcus/"))

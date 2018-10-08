@@ -4,9 +4,8 @@
 
 library(data.table)
 library(tidyverse)
-library(data.table)
 library(philentropy)
-library(TDAmapper)
+library(tidygraph)
 library(ggraph)
 library(igraph)
 library(cowplot)
@@ -41,26 +40,22 @@ cholera.v2p <- merge.mpr.samples(cholera.mapper, gordon.samples)
 subplots <- list() # list of subplots
 
 set.seed(1)
-lo <- create_layout(cholera.mapper$graph, "fr", niter = 1000)
-xy <- lo[, c("x", "y")]
-# color by fraction samples marked diarrhea
+# lay out Mapper graph without singletons
+lo <- cholera.mapper$graph %>%
+  activate(nodes) %>%
+  filter(!in.singleton) %>%
+  create_layout("fr", niter = 1000)
 theme_set(theme_graph(base_family = "Helvetica"))
-ggraph(cholera.mapper$graph, "manual", 
-                          node.positions = xy) +
+ggraph(lo) + # color by fraction samples marked diarrhea
   geom_edge_link0() +
-  geom_node_point(aes(color = f.state, size = size),
-                  data = function(df) filter(df, in.singleton),
-                  fill = "white", shape = 21) +
   geom_node_point(aes(fill = f.state, size = size),
                   data = function(df) filter(df, !in.singleton), shape = 21) +
-  scale_color_distiller(palette = "Spectral") +
   scale_fill_distiller(palette = "Spectral") +
-  labs(color = "fraction\ndiarrhea") +
-  guides(fill = FALSE) +
+  labs(fill = "fraction\ndiarrhea") +
   theme_graph(base_family = "Helvetica") +
   coord_equal()
 subplots$fstate <- last_plot()
-ggraph(cholera.mapper$graph, "manual", node.positions = xy) +
+ggraph(lo) +
   geom_edge_link0() +
   geom_node_point(aes(size = size, color = scaled.knn)) +
   scale_color_distiller(palette = "Greys") +
@@ -70,16 +65,16 @@ ggraph(cholera.mapper$graph, "manual", node.positions = xy) +
   guides(size = FALSE) +
   scale_edge_color_distiller(palette = "Greys")
 subplots$density <- last_plot()
-ggraph(cholera.mapper$graph, "manual", node.positions = xy) +
+ggraph(lo) +
   geom_edge_link0() +
   geom_node_point(aes(fill = as.factor(basin), size = size),
-                  # data = function(df) filter(df, !in.singleton), 
+                  # data = function(df) filter(df, !in.singleton),
                   shape = 21) +
   labs(fill = "basin") +
-  scale_fill_brewer(palette = "Accent") +
+  scale_fill_brewer(palette = "Accent", na.value = "white") +
   theme_graph(base_family = "Helvetica") +
   coord_equal() +
-  guides(size = FALSE) 
+  guides(size = FALSE)
 subplots$basin <- last_plot()
 
 #' # Subject dynamics
@@ -178,7 +173,7 @@ plot_grid(
   ggraph(david.mapper$graph, "manual", node.positions = david.xy) +
     geom_edge_link0() +
     geom_node_point(aes(size = size), color = "grey") +
-    geom_node_point(aes(size = size), 
+    geom_node_point(aes(size = size),
                     data = function(df) {
                       filter(df, vertex %in% david.v2p[.("A", "US (pre)")]$vertex)
                     },
@@ -189,7 +184,7 @@ plot_grid(
   ggraph(david.mapper$graph, "manual", node.positions = david.xy) +
     geom_edge_link0() +
     geom_node_point(aes(size = size), color = "grey") +
-    geom_node_point(aes(size = size), 
+    geom_node_point(aes(size = size),
                     data = function(df) {
                       filter(df, vertex %in% david.v2p[.("A", "US (post)")]$vertex)
                     },
@@ -200,7 +195,7 @@ plot_grid(
   ggraph(david.mapper$graph, "manual", node.positions = david.xy) +
     geom_edge_link0() +
     geom_node_point(aes(size = size), color = "grey") +
-    geom_node_point(aes(size = size), 
+    geom_node_point(aes(size = size),
                     data = function(df) {
                       filter(df, vertex %in% david.v2p[.("B", "pre-Salmonella")]$vertex)
                     },
@@ -211,7 +206,7 @@ plot_grid(
   ggraph(david.mapper$graph, "manual", node.positions = david.xy) +
     geom_edge_link0() +
     geom_node_point(aes(size = size), color = "grey") +
-    geom_node_point(aes(size = size), 
+    geom_node_point(aes(size = size),
                     data = function(df) {
                       filter(df, vertex %in% david.v2p[.("B", "post-Salmonella")]$vertex)
                     },
@@ -238,7 +233,7 @@ ggraph(david.mapper$graph, "manual", node.positions = david.xy) +
 david.subplots$basin <- last_plot()
 
 david.v2p[, basin := as.factor(basin)]
-david.sample.basins <- david.v2p[, .N, by = .(subject, day, point, event, basin)] 
+david.sample.basins <- david.v2p[, .N, by = .(subject, day, point, event, basin)]
 david.sample.basins %>%
   ggplot(aes(x = day, y = basin)) +
   geom_tile(data = function(dt) filter(dt, is.na(basin)), fill = "grey50") +
@@ -246,7 +241,7 @@ david.sample.basins %>%
   scale_fill_brewer(palette = "Set1") +
   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
   facet_grid(subject ~ .)
-david.sample.basins %>% 
+david.sample.basins %>%
   group_by(subject, event) %>%
   mutate(frac = N / sum(N)) %>%
   group_by(subject, event, basin) %>%
@@ -274,15 +269,16 @@ ggraph(hotbats.mapper$graph, "manual", node.positions = hotbats.xy) +
   coord_equal()
 ggraph(hotbats.mapper$graph, "manual", node.positions = hotbats.xy) +
   geom_edge_link0() +
-  geom_node_point(aes(size = size, fill = mean.depth), shape = 21) +
+  geom_node_point(aes(size = size, fill = mean.temp), shape = 21) +
   scale_fill_distiller(palette = "Spectral") +
   theme_graph(base_family = "Helvetica") +
   labs(fill = "temp (C)") +
   coord_equal()
-hotbats.mapper$graph <- hotbats.mapper$graph %>% 
-  activate(nodes) %>% 
-  mutate(basin = as.factor(basin)) %>% 
-  mutate(basin = mapply(function(b, x) if (x) NA else b), b = basin, x = in.singleton)
+hotbats.mapper$graph <- hotbats.mapper$graph %>%
+  activate(nodes) %>%
+  mutate(basin = mapply(function(b, x) if (x) NA else b,
+                        b = basin, x = in.singleton)) %>%
+  mutate(basin = as.factor(basin))
 ggraph(hotbats.mapper$graph, "manual", node.positions = hotbats.xy) +
   geom_edge_link0() +
   geom_node_point(aes(size = size, fill = basin), shape = 21) +
@@ -324,23 +320,23 @@ david.persistence <- david.v2p %>%
   rbindlist(idcol = "subject.event") %>%
   .[, c("subject", "event") := tstrsplit(subject.event, "\\.")] %>%
   .[, subject.event := NULL] %>%
-  .[, basin := as.factor(as.numeric(basin))] %>% 
+  .[, basin := as.factor(as.numeric(basin))] %>%
   # .[, N := .N, by = .(basin, delta.t, subject, event)]
   .[, N := uniqueN(delta.t), by = .(basin, subject, event)]
 setkey(david.persistence, subject)
 pl <- lapply(split(david.persistence[!is.na(basin)], by = "subject"),
           function(dt) {
-            dt %>%  
-              ggplot(aes(x = delta.t, y = f, color = basin)) + 
+            dt %>%
+              ggplot(aes(x = delta.t, y = f, color = basin)) +
               geom_point(data = function(df) filter(df, N <= 10),
                           alpha = 0.5) +
-              geom_smooth(aes(color = basin, fill = basin),  
-                          data = function(df) filter(df, N > 10)) +  
+              geom_smooth(aes(color = basin, fill = basin),
+                          data = function(df) filter(df, N > 10)) +
               scale_color_hue(drop = FALSE) +
               scale_fill_hue(drop = FALSE) +
-              coord_cartesian(ylim = c(0, 1)) + 
+              coord_cartesian(ylim = c(0, 1)) +
               labs(x = "interval (days)", y = "correlation") +
-              facet_wrap(~ event, ncol = 1) 
+              facet_wrap(~ event, ncol = 1)
             })
 plot_grid(pl[[1]] + theme(legend.position = "none"),
           pl[[2]] + theme(legend.position = "none"),
