@@ -31,6 +31,7 @@ ggraph(lo) +
   labs(fill = "subject") +
   scale_fill_distiller(palette = "Spectral", breaks = c(0, 0.5, 1),
                        labels = c("all B", "", "all A")) +
+  scale_size_area(max_size = 4) +
   guides(size = FALSE) +
   theme_graph(base_family = "Helvetica") +
   coord_equal()
@@ -41,10 +42,10 @@ fsubject <- last_plot()
 
 
 setkey(david.v2p, subject, event)
-title.size <- 8
+title.size <- 10
 base.size <- 8
 theme_set(theme_graph(base_family = "Helvetica", title_size = title.size,
-                      base_size = base.size))
+                      base_size = base.size) +  theme(legend.position = "none"))
 plot_grid(
   ggraph(lo) +
     geom_edge_link0() +
@@ -55,6 +56,7 @@ plot_grid(
                     },
                     fill = "blue", shape = 21) +
     labs(title = "A, pre-travel") +
+    scale_size_area(max_size = 2) +
     coord_equal(),
   ggraph(lo) +
     geom_edge_link0() +
@@ -64,6 +66,7 @@ plot_grid(
                       filter(df, vertex %in% david.v2p[.("A", "US (post)")]$vertex)
                     },
                     fill = "purple", shape = 21) +
+    scale_size_area(max_size = 2) +
     labs(title = "A, post-travel") +
     coord_equal(),
   ggraph(lo) +
@@ -74,6 +77,7 @@ plot_grid(
                       filter(df, vertex %in% david.v2p[.("B", "pre-Salmonella")]$vertex)
                     },
                     fill = "red", shape = 21) +
+    scale_size_area(max_size = 2) +
     labs(title = "B, pre-Salmonella") +
     coord_equal(),
   ggraph(lo) +
@@ -84,6 +88,7 @@ plot_grid(
                       filter(df, vertex %in% david.v2p[.("B", "post-Salmonella")]$vertex)
                     },
                     fill = "orange", shape = 21) +
+    scale_size_area(max_size = 2) +
     labs(title = "B, post-Salmonella") +
     coord_equal()
 )
@@ -104,7 +109,7 @@ ggraph(lo) +
 basins <- last_plot()
 
 
-# basin series and distribs -----------------------------------------------
+# basin series -----------------------------------------------
 
 
 david.v2p[, basin := as.factor(basin)]
@@ -112,12 +117,17 @@ david.sample.basins <- david.v2p[, .N, by = .(subject, day, point, event, basin)
 theme_set(theme_cowplot())
 david.sample.basins %>%
   ggplot(aes(x = day, y = basin)) +
-  geom_tile(data = function(dt) filter(dt, is.na(basin)), fill = "grey50") +
-  geom_tile(aes(fill = event), data = function(dt) filter(dt, !is.na(basin))) +
-  scale_fill_brewer(palette = "Set1") +
+  geom_tile(data = function(dt) dt[is.na(basin)], fill = "grey50") +
+  geom_tile(aes(fill = event), data = function(dt) dt[!is.na(basin)]) +
+  scale_fill_brewer(palette = "Set1") +  
+  scale_y_discrete(drop = FALSE) +
   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
   facet_grid(subject ~ .)
 series <- last_plot()
+
+# distribs ----------------------------------------------------------------
+
+
 david.sample.basins %>%
   group_by(subject, event) %>%
   mutate(frac = N / sum(N)) %>%
@@ -155,21 +165,35 @@ pl <- lapply(split(david.persistence[!is.na(basin)], by = "subject"),
               scale_color_hue(drop = FALSE) +
               scale_fill_hue(drop = FALSE) +
               coord_cartesian(ylim = c(0, 1)) +
+              scale_y_continuous(breaks = c(0, 0.5, 1)) +
               labs(x = "interval (days)", y = "correlation") +
               facet_wrap(~ event, ncol = 1)
             })
-plot_grid(pl[[1]] + theme(legend.position = "none"),
-          pl[[2]] + theme(legend.position = "none"),
-          # get_legend(pl[[1]]),
-          nrow = 1#, rel_widths = c(4, 4, 1), labels = c("A", "B", "")
-          )
+theme_set(theme_cowplot() + theme(legend.position = "none",
+                                  axis.text = element_text(size = title.size),
+                                  axis.title = element_text(size = title.size),
+                                  strip.text = element_text(size = title.size)))
+plot_grid(pl[[1]], pl[[2]], nrow = 1)
 correlation <- last_plot()
 
 
 # compiled ----------------------------------------------------------------
 
-plot_grid(plot_grid(fsubject, events, nrow = 1),
-          basins + guides(fill = guide_legend(ncol = 4)),
-          plot_grid(distribs + theme(legend.position = "none"),
-                    correlation + theme(legend.position = "none")),
-          ncol = 1)
+plot_grid(fsubject, events, ncol = 2, labels = "AUTO")
+save_plot("../../figures/tda/paper/fig3.pdf", last_plot(), ncol = 2,
+          base_width = 4)
+plot_grid(basins + guides(fill = guide_legend(nrow = 10)),
+          plot_grid(distribs + theme(legend.position = "none",
+                                     axis.text = element_text(size = title.size),
+                                     axis.title = element_text(size = title.size)), 
+                    correlation, 
+                    ncol = 2, labels = c("B", "C")),
+          series + theme_cowplot(font_size = title.size) + 
+            guides(fill = guide_legend(direction = "horizontal")) +
+            theme(legend.position = "bottom", axis.text.y = element_blank(),
+                  axis.ticks = element_blank()),
+          labels = c("A", "", "D"),
+          ncol = 1,
+          rel_heights = c(2, 2, 1)
+          )
+save_plot("../../figures/tda/paper/fig4.pdf", last_plot(), nrow = 3, base_width = 8)
