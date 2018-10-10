@@ -39,7 +39,7 @@ write.graph <- function(tbl_graph, v2p, directory) {
 
 # cholera -----------------------------------------------------------------
 
-source(paste0(util.dir, "load_cholera_data.R"))
+source("../r/load_cholera_data.R")
 
 gordon[, freq := count / sum(count), by = sample]
 gordon.samples <- unique(gordon[, .(sample, subject, diagnosis, id, hour)])
@@ -265,6 +265,6 @@ graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
 graf <- graf %>%
   mutate(membership = components(.)$membership) %>%
   mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
-graf <- mutate(graf, basin = as.factor(basin))
+graf <- mutate(graf, basin = nullify(in.singleton, basin))
 write.graph(graf, v2p[, .(point.name, vertex)],
             paste0(output.dir, "prochlorococcus/"))
