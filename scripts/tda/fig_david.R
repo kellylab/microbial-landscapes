@@ -119,7 +119,7 @@ david.sample.basins %>%
   ggplot(aes(x = day, y = basin)) +
   geom_tile(data = function(dt) dt[is.na(basin)], fill = "grey50") +
   geom_tile(aes(fill = event), data = function(dt) dt[!is.na(basin)]) +
-  scale_fill_brewer(palette = "Set1") +  
+  scale_fill_brewer(palette = "Set1") +
   scale_y_discrete(drop = FALSE) +
   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
   facet_grid(subject ~ .)
@@ -145,35 +145,51 @@ distribs <- last_plot()
 
 
 david.persistence <- david.v2p %>%
-  split(by = c("subject", "event")) %>%
+  split(by = c("subject", "event", "healthy")) %>%
   lapply(function(df) basin.persistence(df$basin, df$day, scale = TRUE)) %>%
-  rbindlist(idcol = "subject.event") %>%
-  .[, c("subject", "event") := tstrsplit(subject.event, "\\.")] %>%
-  .[, subject.event := NULL] %>%
+  rbindlist(idcol = "id") %>%
   .[, basin := as.factor(as.numeric(basin))] %>%
-  # .[, N := .N, by = .(basin, delta.t, subject, event)]
-  .[, N := uniqueN(delta.t), by = .(basin, subject, event)]
-setkey(david.persistence, subject)
-pl <- lapply(split(david.persistence[!is.na(basin)], by = "subject"),
-          function(dt) {
-            dt %>%
-              ggplot(aes(x = delta.t, y = f, color = basin)) +
-              geom_point(data = function(df) filter(df, N <= 10),
-                          alpha = 0.5) +
-              geom_smooth(aes(color = basin, fill = basin),
-                          data = function(df) filter(df, N > 10)) +
-              scale_color_hue(drop = FALSE) +
-              scale_fill_hue(drop = FALSE) +
-              coord_cartesian(ylim = c(0, 1)) +
-              scale_y_continuous(breaks = c(0, 0.5, 1)) +
-              labs(x = "interval (days)", y = "correlation") +
-              facet_wrap(~ event, ncol = 1)
-            })
+  .[, N := uniqueN(delta.t), by = .(id, basin)] %>%
+  .[, c("subject", "event", "healthy") := tstrsplit(id, "\\.",
+                                                    type.convert = TRUE)] %>%
+  .[, id := NULL]
+# setkey(david.persistence, subject)
+# pl <- lapply(split(david.persistence[!is.na(basin)], by = "subject"),
+#           function(dt) {
+#             dt %>%
+#               ggplot(aes(x = delta.t, y = f, color = basin)) +
+#               geom_point(data = function(df) filter(df, N <= 10),
+#                          alpha = 0.5) +
+#               geom_smooth(aes(color = basin, fill = basin),
+#                           data = function(df) filter(df, N > 10)) +
+#               scale_color_hue(drop = FALSE) +
+#               scale_fill_hue(drop = FALSE) +
+#               coord_cartesian(ylim = c(0, 1)) +
+#               scale_y_continuous(breaks = c(0, 0.5, 1)) +
+#               labs(x = "interval (days)", y = "correlation") +
+#               facet_wrap(~ event, ncol = 1)
+#             })
 theme_set(theme_cowplot() + theme(legend.position = "none",
                                   axis.text = element_text(size = title.size),
                                   axis.title = element_text(size = title.size),
                                   strip.text = element_text(size = title.size)))
-plot_grid(pl[[1]], pl[[2]], nrow = 1)
+# plot_grid(pl[[1]], pl[[2]], nrow = 2)
+graphic.size <- 0.5
+ggplot(david.persistence[!is.na(basin) & healthy],
+       aes(x = delta.t, y = f, color = basin)) +
+  geom_point(data = function(df) filter(df, N <= 10),
+             alpha = 0.5, size = graphic.size) +
+  geom_smooth(aes(color = basin, fill = basin),
+              data = function(df) filter(df, N > 10),
+              size = graphic.size) +
+  scale_color_hue(drop = FALSE) +
+  scale_fill_hue(drop = FALSE) +
+  coord_cartesian(ylim = c(0, 1)) +
+  scale_y_continuous(breaks = c(0, 0.5, 1)) +
+  labs(x = "interval (days)", y = "correlation") +
+  # facet_wrap(~ subject + event, ncol = 1, strip.position = "right") +
+  facet_grid(paste(subject, event, sep = ", ") ~ .) +
+  theme(strip.text.y = element_text(angle = 0))
 correlation <- last_plot()
 
 
@@ -183,17 +199,24 @@ plot_grid(fsubject, events, ncol = 2, labels = "AUTO")
 save_plot("../../figures/tda/paper/fig3.pdf", last_plot(), ncol = 2,
           base_width = 4)
 plot_grid(basins + guides(fill = guide_legend(nrow = 10)),
-          plot_grid(distribs + theme(legend.position = "none",
-                                     axis.text = element_text(size = title.size),
-                                     axis.title = element_text(size = title.size)), 
-                    correlation, 
+          plot_grid(distribs +
+                      theme(legend.position = "none",
+                            axis.text = element_text(size = base.size),
+                            axis.title = element_text(size = title.size)),
+                    correlation +
+                      theme(axis.text = element_text(size = base.size),
+                            strip.text.y = element_text(size = title.size)),
                     ncol = 2, labels = c("B", "C")),
-          series + theme_cowplot(font_size = title.size) + 
-            guides(fill = guide_legend(direction = "horizontal")) +
-            theme(legend.position = "bottom", axis.text.y = element_blank(),
-                  axis.ticks = element_blank()),
-          labels = c("A", "", "D"),
+          # series + theme_cowplot(font_size = title.size) +
+          #   guides(fill = guide_legend(direction = "horizontal")) +
+          #   theme(legend.position = "bottom", axis.text.y = element_blank(),
+          #         axis.ticks = element_blank()),
+          # labels = c("A", "", "D"),
+          # rel_heights = c(2, 2, 1)
+          labels = c("A", ""),
           ncol = 1,
-          rel_heights = c(2, 2, 1)
+          rel_heights = c(1.5, 1)
           )
-save_plot("../../figures/tda/paper/fig4.pdf", last_plot(), nrow = 3, base_width = 8)
+save_plot("../../figures/tda/paper/fig4.pdf", last_plot(), nrow = 2, base_width = 8)
+theme_set(theme_cowplot())
+save_plot("../../figures/tda/paper/fig5.pdf", series, base_width = 8)

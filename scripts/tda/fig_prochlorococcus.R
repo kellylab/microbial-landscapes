@@ -148,10 +148,10 @@ correlation <- last_plot()
 plot_grid(plot_grid(temp, depth, nrow = 1, labels = "AUTO"),
           basins, labels = c("", "C"),
           ncol = 1)
-save_plot("../../figures/tda/paper/fig5.pdf", last_plot(),
+save_plot("../../figures/tda/paper/fig6.pdf", last_plot(),
           ncol = 1,
           base_width = 8, base_height = 8)
 plot_grid(series, distribs, correlation,
           ncol = 1, labels = "AUTO")
-save_plot("../../figures/tda/paper/fig6.pdf", last_plot(), ncol = 1,
+save_plot("../../figures/tda/paper/fig7.pdf", last_plot(), ncol = 1,
           base_width = 8, base_height = 12)

@@ -25,3 +25,11 @@ SIMPLIFY = FALSE) %>% rbindlist(use.names = TRUE)
 events <- events[, .(event = paste(event, collapse = " + ")),
                  by = .(subject, day)]
 david.samples <- merge(david.samples, events, by = c("subject", "day"))
+is.healthy <- function(event) {
+  if (event == "Salmonella" | grepl("diarrhea", event)) {
+    FALSE
+  } else {
+    TRUE
+  }
+}
+david.samples[, healthy := sapply(event, is.healthy)]
