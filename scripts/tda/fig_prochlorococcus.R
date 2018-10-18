@@ -72,9 +72,11 @@ basins <- last_plot()
 p2basin <- prochlorococcus.v2p[, .N,
                                by = .(site, depth, month, day, cal.month, basin)]
 theme_set(theme_cowplot())
-plot.series <- function(df) {
-  ggplot(df, aes(x = month, y = basin)) +
+plot.series <- function(dt) {
+  jans <- dt[cal.month == 1, unique(month)]
+  ggplot(dt, aes(x = month, y = basin)) +
     geom_tile(aes(fill = basin)) +
+    geom_vline(xintercept = jans, linetype = "dotted") +
     facet_wrap(~ depth, nrow = 4) +
     theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
           legend.position = "none")
