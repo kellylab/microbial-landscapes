@@ -1,3 +1,6 @@
+# # TDA of bacterial and eukaryotic time series in Nahant
+
+# setup -------------------------------------------------------------------
 library(tidyverse)
 library(data.table)
 library(TDAmapper)
@@ -6,18 +9,12 @@ library(igraph)
 library(tidygraph)
 library(cowplot)
 
-# setup -------------------------------------------------------------------
-
-
 scripts.dir <- "../r/"
+utils.dir <- "utils/"
+for (script in list.files(utils.dir, full.names = TRUE)) source(script)
 figs.dir <- "../../figures/tda/"
 
 source(paste0(scripts.dir, "load-nahant-data.R"))
-source("k.first.R")
-source("vertex.2.points.R")
-source("mapper.2.igraph.R")
-source("plot.mapper.R")
-source("dist2knn.R")
 
 nahant <- nahant[!is.na(kingdom)]
 nahant[, freq := value / sum(value), by = .(kingdom, day)]
@@ -34,7 +31,9 @@ jsds <- c(Bacteria = "Bacteria", Eukaryota = "Eukaryota") %>%
 })
 distances <- lapply(jsds, sqrt)
 
-#' # Joint bac-euk analysis
+# joint analysis ----------------------------------------------------------
+
+
 jdays <- sort(rownames(distances[["Bacteria"]]))
 jdist <- distances %>%
   lapply(function(m, jdays) m[jdays, jdays], jdays = jdays) %>%

@@ -1,3 +1,8 @@
+#' # Mapper analysis of Nahant bacteria and eukaryotes in parallel
+
+# setup -------------------------------------------------------------------
+
+
 library(tidyverse)
 library(data.table)
 library(philentropy)
@@ -8,12 +13,11 @@ library(tidygraph)
 library(cowplot)
 
 scripts.dir <- "../r/"
+utils.dir <- "utils/"
+for (script in list.files(utils.dir, full.names = TRUE)) source(script)
 figs.dir <- "../../figures/tda/"
+
 source(paste0(scripts.dir, "load-nahant-data.R"))
-source("k.first.R")
-source("vertex.2.points.R")
-source("mapper.2.igraph.R")
-source("plot.mapper.R")
 
 nahant <- nahant[!is.na(kingdom)]
 nahant[, freq := value / sum(value), by = .(kingdom, day)]
@@ -30,7 +34,12 @@ jsds <- c(Bacteria = "Bacteria", Eukaryota = "Eukaryota") %>%
     m
 })
 distances <- lapply(jsds, sqrt)
-k <- 10
+
+
+# knn ---------------------------------------------------------------------
+
+
+k <- round(nrow(distances$Bacteria) / 10)
 samples <- lapply(distances, function(m, k) {
   v <- apply(m, 1, k.first, k = k)
   data.table(day = as.numeric(names(v)), kNN = v)
@@ -46,22 +55,66 @@ mds <- lapply(distances, cmdscale, eig = TRUE)
 #' states:
 for (x in mds) {
   print(x$GOF)
-  plot(x$points)
+  plot(x$points, asp = 1)
 }
 rk.mds <- lapply(mds, function(x) {
   pts <- x$points
   apply(pts, 2, rank, ties.method = "first")
 })
+for (x in rk.mds) {
+  plot(x, asp = 1)
+}
 
 
 # mapper ------------------------------------------------------------------
 
-ni <- c(10, 10)
-po <- 70
-mpr <- mapply(function(distance, rk.mds) {
+ni <- list(c(40, 40), c(10, 10))
+po <- list(85, 50)
+mpr <- mapply(function(distance, rk.mds, po, ni) {
   mapper2D(distance, list(rk.mds[, 1], rk.mds[, 2]), num_intervals = ni,
            percent_overlap = po)
-}, distance = distances, rk.mds = rk.mds, SIMPLIFY = FALSE)
+}, distance = distances, rk.mds = rk.mds, ni = ni, po = po,
+SIMPLIFY = FALSE)
+
+# points in level
+pil <- mpr %>%
+  lapply(function(m) {
+    dt <- data.table(points = sapply(m$points_in_level, length))
+  }) %>%
+  rbindlist(idcol = "kingdom") %>%
+  ggplot(aes(x = points)) +
+  geom_bar() +
+  facet_wrap(~ kingdom) +
+  ggtitle("points per level")
+
+# points per vertex
+ppv <- mpr %>%
+  lapply(function(m) {
+    dt <- data.table(points = sapply(m$points_in_vertex, length))
+  }) %>%
+  rbindlist(idcol = "kingdom") %>%
+  ggplot(aes(x = points)) +
+  geom_bar() +
+  facet_wrap(~ kingdom) +
+  ggtitle("points per vertex")
+
+# components per graph
+grafs <- lapply(mpr, mapper.2.igraph)
+cpg <- grafs %>%
+  lapply(function(g) {
+    v <- components(g)$csize
+    data.table(rk = frank(-v, ties.method = "first"), size = v)
+  }) %>%
+  rbindlist(idcol = "kingdom") %>%
+  ggplot(aes(x = rk, y = size)) +
+  geom_point() +
+  facet_wrap(~ kingdom, scales = "free_x") +
+  ggtitle("component size-rank")
+plot_grid(pil, ppv, cpg, align = "v")
+
+# plot --------------------------------------------------
+
+
 v2p <- lapply(mpr, function(x) {
   dt <- vertex.2.points(x$points_in_vertex)
   setnames(dt, "point.name", "day")
@@ -70,33 +123,38 @@ v2p <- lapply(mpr, function(x) {
 })
 v2p <- mapply(merge, x = v2p, y = samples, MoreArgs = list(by = "day"),
               SIMPLIFY = FALSE)
+
+# summary statistics per vertex
 vertices <- lapply(v2p, function(dt) {
   dt[, .(mean.day = mean(day),
          mean.kNN = mean(kNN),
          size = .N),
      by = .(vertex, vertex.name)]
 })
-grafs <- lapply(mpr, mapper.2.igraph)
+set.seed(0)
+layouts <- lapply(grafs, create_layout, layout = "fr")
 grafs <- mapply(function(graf, verts) {
   graf %>%
     as_tbl_graph %>%
     activate(nodes) %>%
     left_join(verts, by = c("name" = "vertex.name"))
 }, graf = grafs, verts = vertices, SIMPLIFY = FALSE)
-set.seed(0)
-layouts <- lapply(grafs, create_layout, layout = "fr")
-grafs <- mapply(function(g, l) {
-  g %>%
-    activate(nodes) %>%
-    mutate(x = l$x, y = l$y)
-}, g = grafs, l = layouts, SIMPLIFY = FALSE)
-size.plots <- mapply(function(lo, kingdom) {
-  p <- plot.mapper(lo, aes_(size = ~size, color = ~mean.day))
-  p + scale_color_distiller(palette = "Spectral")
-}, lo = layouts, kingdom = names(layouts), SIMPLIFY = FALSE)
-plot_grid(plotlist = size.plots, labels = names(size.plots))
-save_plot(paste0(figs.dir, "nahant-mean-day.pdf"), last_plot(),
-          ncol = 2, base_height = 6)
+
+# mean day
+day.plots <- mapply(function(g, lo) {
+  ggraph(g, "manual", node.positions = lo[, c("x", "y")]) +
+    geom_edge_link0() +
+    geom_node_point(aes(size = size, fill = mean.day), shape = 21) +
+    scale_fill_distiller(palette = "Spectral") +
+    theme_graph(base_family = "Helvetica")
+}, g = grafs, lo = layouts, SIMPLIFY = FALSE)
+plot_grid(plotlist = day.plots, labels = names(day.plots))
+# save_plot(paste0(figs.dir, "nahant-mean-day.pdf"), last_plot(),
+#           ncol = 2, base_height = 6)
+
+# density -----------------------------------------------------------------
+
+
 kNN.plots <- mapply(function(lo, kingdom) {
   p <- plot.mapper(lo, aes_(size = ~size, color = ~mean.kNN),
                    list(title = kingdom))
