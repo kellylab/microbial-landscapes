@@ -44,6 +44,7 @@ samples <- lapply(distances, function(m, k) {
   v <- apply(m, 1, k.first, k = k)
   data.table(day = as.numeric(names(v)), kNN = v)
 }, k = k)
+
 #' Bacteria show trend of increasing instability toward day 250, while
 #' eukaryotes have about the same stability:
 ggplot(rbindlist(samples, idcol = "kingdom"), aes(x = day, y = kNN)) +
@@ -51,6 +52,7 @@ ggplot(rbindlist(samples, idcol = "kingdom"), aes(x = day, y = kNN)) +
   geom_smooth() +
   facet_wrap(~ kingdom, nrow = 2)
 mds <- lapply(distances, cmdscale, eig = TRUE)
+
 #' 2D MDS is lossy, but suggests existence of 2 bacterial and 2-3 eukaryotic
 #' states:
 for (x in mds) {
@@ -68,53 +70,26 @@ for (x in rk.mds) {
 
 # mapper ------------------------------------------------------------------
 
-ni <- list(c(40, 40), c(10, 10))
-po <- list(85, 50)
-mpr <- mapply(function(distance, rk.mds, po, ni) {
+bn <- 20
+en <- 20
+ni <- list(c(bn, bn), c(en, en))
+po <- list(80, 80)
+bb <- 10
+eb <- 10
+nbin <- list(bb, eb)
+mpr <- mapply(function(distance, rk.mds, po, ni, nb) {
   mapper2D(distance, list(rk.mds[, 1], rk.mds[, 2]), num_intervals = ni,
-           percent_overlap = po)
-}, distance = distances, rk.mds = rk.mds, ni = ni, po = po,
+           percent_overlap = po, num_bins_when_clustering = nb)
+}, distance = distances, rk.mds = rk.mds, ni = ni, po = po, nb = nbin,
 SIMPLIFY = FALSE)
+summaries <- lapply(mpr, summary, plot = TRUE)
+plot_grid(plotlist = summaries, ncol = 2, labels = names(summaries), align = "h")
 
-# points in level
-pil <- mpr %>%
-  lapply(function(m) {
-    dt <- data.table(points = sapply(m$points_in_level, length))
-  }) %>%
-  rbindlist(idcol = "kingdom") %>%
-  ggplot(aes(x = points)) +
-  geom_bar() +
-  facet_wrap(~ kingdom) +
-  ggtitle("points per level")
-
-# points per vertex
-ppv <- mpr %>%
-  lapply(function(m) {
-    dt <- data.table(points = sapply(m$points_in_vertex, length))
-  }) %>%
-  rbindlist(idcol = "kingdom") %>%
-  ggplot(aes(x = points)) +
-  geom_bar() +
-  facet_wrap(~ kingdom) +
-  ggtitle("points per vertex")
-
-# components per graph
-grafs <- lapply(mpr, mapper.2.igraph)
-cpg <- grafs %>%
-  lapply(function(g) {
-    v <- components(g)$csize
-    data.table(rk = frank(-v, ties.method = "first"), size = v)
-  }) %>%
-  rbindlist(idcol = "kingdom") %>%
-  ggplot(aes(x = rk, y = size)) +
-  geom_point() +
-  facet_wrap(~ kingdom, scales = "free_x") +
-  ggtitle("component size-rank")
-plot_grid(pil, ppv, cpg, align = "v")
 
 # plot --------------------------------------------------
 
 
+grafs <- lapply(mpr, mapper.2.igraph)
 v2p <- lapply(mpr, function(x) {
   dt <- vertex.2.points(x$points_in_vertex)
   setnames(dt, "point.name", "day")
