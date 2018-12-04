@@ -70,12 +70,12 @@ for (x in rk.mds) {
 
 # mapper ------------------------------------------------------------------
 
-bn <- 20
-en <- 20
+bn <- 10
+en <- 5
 ni <- list(c(bn, bn), c(en, en))
-po <- list(80, 80)
-bb <- 10
-eb <- 10
+po <- list(80, 70)
+bb <- 15
+eb <- 20
 nbin <- list(bb, eb)
 mpr <- mapply(function(distance, rk.mds, po, ni, nb) {
   mapper2D(distance, list(rk.mds[, 1], rk.mds[, 2]), num_intervals = ni,
@@ -85,6 +85,29 @@ SIMPLIFY = FALSE)
 summaries <- lapply(mpr, summary, plot = TRUE)
 plot_grid(plotlist = summaries, ncol = 2, labels = names(summaries), align = "h")
 
+# bbins <- height.distribs(distances$Bacteria, mpr$Bacteria$points_in_level,
+#                          nbin = bb)
+# get.cutoff <- function(dt) {
+#   get.min <- function(bin, n) {
+#     x <- bin[n == 0]
+#     if (length(x) > 0) {
+#       min(x)
+#     } else {
+#       NA_integer_
+#     }
+#   }
+#   dt[, .(bin = get.min(bin, n)), by = level]
+# }
+# ggplot(bbins, aes(x = level, y = bin)) +
+#   geom_tile(aes(fill = n)) +
+#   scale_fill_gradient(low = "white", high = "blue") +
+#   geom_tile(data = get.cutoff, fill = "red")
+# bbins[, f := n / sum(n), by = level]
+# ggplot(bbins, aes(x = bin, y = f)) +
+#   stat_smooth(aes(group = level, color = level), se = FALSE, linetype = "dotted") +
+#   # geom_jitter(aes(color = level)) +
+#   scale_color_distiller(palette = "Spectral")
+#   # stat_boxplot(aes(group = bin))
 
 # plot --------------------------------------------------
 
@@ -107,7 +130,7 @@ vertices <- lapply(v2p, function(dt) {
      by = .(vertex, vertex.name)]
 })
 set.seed(0)
-layouts <- lapply(grafs, create_layout, layout = "fr")
+layouts <- lapply(grafs, create_layout, layout = "fr", niter = 40)
 grafs <- mapply(function(graf, verts) {
   graf %>%
     as_tbl_graph %>%
