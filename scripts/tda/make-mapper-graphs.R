@@ -21,18 +21,16 @@ for (script in list.files("utils/", full.names = TRUE)) source(script)
 
 write.graph <- function(tbl_graph, v2p, directory) {
   if (!dir.exists(directory)) {
-    dir.create(directory)
+    dir.create(directory, recursive = TRUE)
   }
   tbl_graph %>%
     activate(nodes) %>%
     as.data.table %>%
-    fwrite(paste0(output.dir, paste0(directory, "vertices.txt")),
-                  sep = "\t", na = "NA")
+    fwrite(paste0(directory, "vertices.txt"), sep = "\t", na = "NA")
   tbl_graph %>%
     activate(edges) %>%
     as.data.table %>%
-    fwrite(paste0(output.dir, paste0(directory, "edges.txt")),
-                  sep = "\t", na = "NA")
+    fwrite(paste0(directory, "edges.txt"), sep = "\t", na = "NA")
   names(v2p) <- c("point", "vertex")
   fwrite(v2p, paste0(directory, "/vertices-to-points.txt"), sep = "\t")
 }
@@ -268,3 +266,109 @@ graf <- graf %>%
 graf <- mutate(graf, basin = nullify(in.singleton, basin))
 write.graph(graf, v2p[, .(point.name, vertex)],
             paste0(output.dir, "prochlorococcus/"))
+
+
+# nahant ------------------------------------------------------------------
+
+
+source(paste0(scripts.dir, "load-nahant-data.R"))
+
+nahant <- nahant[!is.na(kingdom)]
+nahant[, freq := value / sum(value), by = .(kingdom, day)]
+
+# jsds
+jsds <- c(Bacteria = "Bacteria", Eukaryota = "Eukaryota") %>%
+  lapply(function(k) {
+    fn <- paste0("jsds/nahant-", k, ".txt")
+    d <- fread(fn)
+    m <- dcast(d, day.i ~ day.j, value.var = "jsd")
+    rn <- m$day.i
+    m <- as.matrix(m[, -1])
+    rownames(m) <- rn
+    m
+})
+distances <- lapply(jsds, sqrt)
+
+#' 2D MDS is lossy, but suggests existence of 2 bacterial and 2-3 eukaryotic
+#' states:
+mds <- lapply(distances, cmdscale, eig = TRUE)
+for (x in mds) {
+  print(x$GOF)
+  plot(x$points, asp = 1)
+}
+rk.mds <- lapply(mds, function(x) {
+  pts <- x$points
+  apply(pts, 2, rank, ties.method = "first")
+})
+for (x in rk.mds) {
+  plot(x, asp = 1)
+}
+
+# mapper call
+bn <- 10
+en <- 5
+ni <- list(c(bn, bn), c(en, en))
+po <- list(70, 70)
+bb <- 10
+eb <- 20
+nbin <- list(bb, eb)
+mpr <- mapply(function(distance, rk.mds, po, ni, nb) {
+  mapper2D(distance, list(rk.mds[, 1], rk.mds[, 2]), num_intervals = ni,
+           percent_overlap = po, num_bins_when_clustering = nb)
+}, distance = distances, rk.mds = rk.mds, ni = ni, po = po, nb = nbin,
+SIMPLIFY = FALSE)
+summaries <- lapply(mpr, summary, plot = TRUE)
+plot_grid(plotlist = summaries, ncol = 2, labels = names(summaries), align = "h")
+
+# make graphs
+grafs <- lapply(mpr, mapper.2.igraph) %>%
+  lapply(as_tbl_graph)
+
+# map vertices to days
+v2p <- lapply(mpr, function(x) {
+  dt <- vertex.2.points(x$points_in_vertex)
+  setnames(dt, "point.name", "day")
+  dt[, day := as.numeric(day)]
+  dt
+})
+
+# knn
+knn <- lapply(distances, function(d) {
+  k <- round(nrow(d) / 10)
+  v <- apply(d, 1, k.first, k = k)
+  data.table(day = as.numeric(names(v)), kNN = v)
+})
+v2p <- mapply(merge, x = v2p, y = knn, MoreArgs = list(by = "day"),
+              SIMPLIFY = FALSE)
+vertices <- lapply(v2p, function(dt) {
+  dt[, .(mean.day = mean(day), mean.knn = mean(kNN), size = .N), by = vertex]
+})
+grafs <- mapply(function(g, d) {
+  d$name <- paste0("v", d$vertex)
+  g %>%
+    activate(nodes) %>%
+    left_join(d, by = "name") %>%
+    mutate(scaled.knn = mean.knn / size)
+}, g = grafs, d = vertices, SIMPLIFY = FALSE)
+grafs <- lapply(grafs, assign.basins, fn = "scaled.knn", ignore.singletons = TRUE)
+grafs <- lapply(grafs, function(g) {
+  g %>% activate(nodes) %>% mutate(basin = as.factor(basin))
+})
+
+# basin plot
+set.seed(0)
+pl <- lapply(grafs, function(g) {
+  ggraph(g, "fr") +
+    geom_edge_link0() +
+    geom_node_point(aes(size = size, fill = basin), shape = 21) +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1)
+})
+plot_grid(plotlist = pl, labels = names(pl))
+
+# save
+dirs <- list(paste0(output.dir, "nahant/bacteria/"),
+             paste0(output.dir, "nahant/eukaryotes/"))
+mapply(write.graph, tbl_graph = grafs,
+       v2p = lapply(v2p, function(d) d[, .(point.name = day, vertex)]),
+       directory = dirs)

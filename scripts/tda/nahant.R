@@ -73,8 +73,8 @@ for (x in rk.mds) {
 bn <- 10
 en <- 5
 ni <- list(c(bn, bn), c(en, en))
-po <- list(80, 70)
-bb <- 15
+po <- list(70, 70)
+bb <- 10
 eb <- 20
 nbin <- list(bb, eb)
 mpr <- mapply(function(distance, rk.mds, po, ni, nb) {
@@ -130,7 +130,7 @@ vertices <- lapply(v2p, function(dt) {
      by = .(vertex, vertex.name)]
 })
 set.seed(0)
-layouts <- lapply(grafs, create_layout, layout = "fr", niter = 40)
+layouts <- lapply(grafs, create_layout, layout = "fr")
 grafs <- mapply(function(graf, verts) {
   graf %>%
     as_tbl_graph %>%
@@ -144,6 +144,7 @@ day.plots <- mapply(function(g, lo) {
     geom_edge_link0() +
     geom_node_point(aes(size = size, fill = mean.day), shape = 21) +
     scale_fill_distiller(palette = "Spectral") +
+    labs(fill = "mean day") +
     theme_graph(base_family = "Helvetica")
 }, g = grafs, lo = layouts, SIMPLIFY = FALSE)
 plot_grid(plotlist = day.plots, labels = names(day.plots))
@@ -164,13 +165,18 @@ plot_grid(plotlist = kNN.plots)
 #' # Composition of bacterial components
 bcomps <- components(grafs[["Bacteria"]])
 bmems <- membership(bcomps)
-grafs[["Bacteria"]] %>%
+grafs$Bacteria %>%
   activate(nodes) %>%
   mutate(component = as.character(bmems[name])) %>%
-  create_layout("manual", node.positions = as.data.frame(select(., x, y))) %>%
-  plot.mapper(aes_(size = ~size, color = ~component))
-save_plot(paste0(figs.dir, "nahant-bac-components.pdf"), last_plot(),
-          base_height = 6)
+  ggraph("manual", node.positions = layouts$Bacteria[, c("x", "y")]) +
+  geom_edge_link0() +
+  geom_node_point(aes(size = size, fill = mean.kNN), shape = 21) +
+  theme_graph(base_family = "Helvetica") +
+  labs(fill = "mean kNN") +
+  scale_fill_distiller(palette = "Blues")
+  theme(aspect.ratio = 1)
+# save_plot(paste0(figs.dir, "nahant-bac-components.pdf"), last_plot(),
+#           base_height = 6)
 
 #' Number of samples in each component
 v2p[["Bacteria"]][, component := bmems[vertex.name]]
