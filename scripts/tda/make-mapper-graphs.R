@@ -332,7 +332,7 @@ v2p <- lapply(mpr, function(x) {
   dt
 })
 
-# knn
+# summary statistics for vertices
 knn <- lapply(distances, function(d) {
   k <- round(nrow(d) / 10)
   v <- apply(d, 1, k.first, k = k)
@@ -350,12 +350,30 @@ grafs <- mapply(function(g, d) {
     left_join(d, by = "name") %>%
     mutate(scaled.knn = mean.knn / size)
 }, g = grafs, d = vertices, SIMPLIFY = FALSE)
+set.seed(0)
+pl <- lapply(grafs, function(g) {
+  ggraph(g, "fr") +
+    geom_edge_link0() +
+    geom_node_point(aes(size = size, fill = mean.day), shape = 21) +
+    scale_fill_distiller(palette = "Spectral") +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1)
+})
+plot_grid(plotlist = pl, labels = names(pl))
+
+# knn and basins
 grafs <- lapply(grafs, assign.basins, fn = "scaled.knn", ignore.singletons = TRUE)
 grafs <- lapply(grafs, function(g) {
   g %>% activate(nodes) %>% mutate(basin = as.factor(basin))
 })
-
-# basin plot
+grafs <- mapply(function(graf, v2p) {
+  comps <- components(graf)
+  graf %>%
+    activate(nodes) %>%
+    mutate(in.singleton = in.singleton(v2p$day, v2p$vertex, comps$membership)) %>%
+    mutate(basin = nullify(in.singleton, basin)) %>%
+    mutate(basin = as.factor(basin))
+}, graf = grafs, v2p = v2p, SIMPLIFY = FALSE)
 set.seed(0)
 pl <- lapply(grafs, function(g) {
   ggraph(g, "fr") +
@@ -372,3 +390,38 @@ dirs <- list(paste0(output.dir, "nahant/bacteria/"),
 mapply(write.graph, tbl_graph = grafs,
        v2p = lapply(v2p, function(d) d[, .(point.name = day, vertex)]),
        directory = dirs)
+
+# sketch for downstream analyses
+for (d in v2p) setkey(d, day)
+map <- merge(v2p$Bacteria, v2p$Eukaryota, suffixes = paste0(".", names(v2p)),
+             allow.cartesian = TRUE) %>%
+  .[, .(vertex.Bacteria = paste0("Bacteria", vertex.Bacteria),
+        vertex.Eukaryota = paste0("Eukaryota", vertex.Eukaryota))] %>%
+  unique
+grafs <- mapply(function(g, k) {
+  mutate(g, name = paste0(k, vertex), basin = paste0(k, basin))
+}, g = grafs, k = names(grafs), SIMPLIFY = FALSE)
+merged.vertices <- lapply(grafs, activate, what = nodes) %>%
+  lapply(as.data.frame) %>%
+  lapply(select, name, basin) %>%
+  rbindlist(idcol = "kingdom") %>%
+  setcolorder(c("name", "basin", "kingdom")) %>%
+  setkey(name)
+map[, ":=" (basin.Bacteria = merged.vertices[vertex.Bacteria, basin],
+            basin.Eukaryota = merged.vertices[vertex.Eukaryota, basin])]
+basin2basin <- map[, .(connectivity = .N / (uniqueN(vertex.Bacteria) *
+                                              uniqueN(vertex.Eukaryota))),
+                   by = .(basin.Bacteria, basin.Eukaryota)]
+ggplot(basin2basin, aes(x = basin.Bacteria, y = basin.Eukaryota)) +
+  geom_tile(aes(fill = connectivity)) +
+  coord_equal()
+# merged.graph <- graph_from_data_frame(map, directed = FALSE,
+#                                       vertices = merged.vertices)
+# merged.graph <- as_tbl_graph(merged.graph) %>%
+#   activate(nodes)
+# xy <- layout_as_bipartite(merged.graph, types = as.data.frame(merged.graph)$kingdom == "Bacteria")
+# ggraph(merged.graph, "fr", coords = xy) +
+#   geom_edge_link0() +
+#   geom_node_point(aes(shape = kingdom, color = basin)) +
+#   theme_graph(base_family = "Helvetica") +
+#   theme(aspect.ratio = 1)
