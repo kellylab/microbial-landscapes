@@ -26,12 +26,13 @@ for (script in list.files("utils/", full.names = TRUE)) source(script)
 #' @param ftr     list of 2 filter values
 #' @param ni      number intervals
 #' @param po      percent overlap
+#' @param vfn     optional, function for aggregating per-vertex data
 #'
 #' @return list, [1] Mapper graph [2] vertex-point map
 #' @export
 #'
 #' @examples
-mapper2.call <- function(dist, samples, ftr, ni, po) {
+mapper2.call <- function(dist, samples, ftr, ni, po, vfn = NULL) {
   mpr <- mapper2D(dist, filter_values = ftr, num_intervals = ni,
                   percent_overlap = po)
   v2p <- vertex.2.points(mpr$points_in_vertex)
@@ -42,6 +43,13 @@ mapper2.call <- function(dist, samples, ftr, ni, po) {
   graf <- graf %>%
     mutate(membership = components(.)$membership) %>%
     mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
+  if (!is.null(vfn)) {
+    vertices <- do.call(vfn, list(map = mpr$map))
+    setorder(vertices, vertex)
+    mpr$graph <- mpr$graph %>%
+      activate(nodes) %>%
+      left_join(vertices, by = c("name" = "vertex.name"))
+  }
   list(graph = graf, map = v2p)
 }
 
@@ -64,30 +72,6 @@ subsample <- function(dist, dt, r = 0.9) {
   setkey(dt, sample)
   dt <- dt[samps]
   list(dist = dist, data = dt)
-}
-
-#' Make a Mapper2D representation of downsampled data
-#'
-#' @param i    RNG seed, default NULL
-#' @param dist distance matrix
-#' @param dt   data
-#' @param r    fraction of data to use
-#' @param ni   number intervals
-#' @param po   percent overlap
-#' @param fn   function for aggregating data per vertex, specific to each data
-#' set
-#'
-#' @return
-#' @export
-#'
-#' @examples
-mapper.subsample <- function(i = NULL, dist, dt, r, ni, po, fn) {
-  set.seed(i)
-  subset <- subsample(dist, dt, r)
-  mds <- cmdscale(subset$dist)
-  rk.mds <- apply(mds, 2, rank)
-  do.call(fn, list(dist = subset$dist, samples = subset$data,
-                   ftr = list(rk.mds[,1], rk.mds[,2]), ni = ni, po = po))
 }
 
 write.graph <- function(tbl_graph, v2p, directory) {
@@ -165,13 +149,10 @@ cholera.vertices <- function(map) {
           size = .N),
       by = .(vertex, vertex.name)]
 }
+
 cholera.mapper <- function(dist, samples, ftr, ni, po) {
   mpr <- mapper2.call(dist, samples, ftr = ftr, ni = ni, po = po)
-  vertices <- mpr$map[, .(mean.knn = mean(knn),
-                          f.state = sum(diagnosis == "diarrhea") / .N,
-                          mean.t = mean(hour),
-                          size = .N),
-                      by = .(vertex, vertex.name)]
+  vertices <- cholera.vertices(mpr$map)
   setorder(vertices, vertex)
   mpr$graph <- mpr$graph %>%
     activate(nodes) %>%
@@ -198,10 +179,16 @@ plot.fstate(mpr$graph)
 # validate
 nrep <- 10
 rs <- c(0.9, 0.5, 0.1)
-subsets <- lapply(rs, function(r, nrep, dist, dt, fn) {
-  lapply(seq_len(nrep), mapper.subsample, dist = dist, dt = dt,
-         r = r, ni = ni, po = po, fn = fn)
-}, nrep = nrep, dist = js.dist, dt = gordon.samples, fn = cholera.mapper)
+subsets <- lapply(rs, function(r, nrep, dist, dt, ni, po) {
+  lapply(seq_len(nrep), function(i, r, dist, dt, ni, po) {
+    subsamp <- subsample(dist, dt, r)
+    mds <- cmdscale(subsamp$dist)
+    rk.mds <- apply(mds, 2, rank)
+    cholera.mapper(subsamp$dist, subsamp$data,
+                   ftr = list(rk.mds[,1], rk.mds[,2]), ni, po)
+  }, r = r, dist = dist, dt = dt, ni = ni, po = po)
+}, nrep = nrep, dist = js.dist, dt = gordon.samples, ni, po)
+
 pl <- lapply(subsets, function(l) {
   plots <- lapply(l, function(mpr) {
     plot.fstate(mpr$graph) +
