@@ -19,6 +19,77 @@ if (!dir.exists(output.dir)) dir.create(output.dir, recursive = TRUE)
 scripts.dir <- "../r/"
 for (script in list.files("utils/", full.names = TRUE)) source(script)
 
+#' Call Mapper2D and map vertices to original data points
+#'
+#' @param dist    distance matrix
+#' @param samples data.table of original data
+#' @param ftr     list of 2 filter values
+#' @param ni      number intervals
+#' @param po      percent overlap
+#'
+#' @return list, [1] Mapper graph [2] vertex-point map
+#' @export
+#'
+#' @examples
+mapper2.call <- function(dist, samples, ftr, ni, po) {
+  mpr <- mapper2D(dist, filter_values = ftr, num_intervals = ni,
+                  percent_overlap = po)
+  v2p <- vertex.2.points(mpr$points_in_vertex)
+  v2p <- merge(v2p, samples, by.x = "point.name", by.y = "sample")
+  v2p[, frac := 1 / .N, by = point]
+  graf <- mapper.2.igraph(mpr) %>%
+    as_tbl_graph
+  graf <- graf %>%
+    mutate(membership = components(.)$membership) %>%
+    mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
+  list(graph = graf, map = v2p)
+}
+
+#' Random subset of distance matrix and data
+#'
+#' @param dist distance matrix
+#' @param dt   original data
+#' @param r    fraction to sample
+#'
+#' @return list, [1] reduced distance matrix [2] reduced data
+#' @export
+#'
+#' @examples
+subsample <- function(dist, dt, r = 0.9) {
+  n <- nrow(dist)
+  size <- round(n * r)
+  idx <- sample.int(n, size)
+  dist <- dist[idx, idx]
+  samps <- rownames(dist)
+  setkey(dt, sample)
+  dt <- dt[samps]
+  list(dist = dist, data = dt)
+}
+
+#' Make a Mapper2D representation of downsampled data
+#'
+#' @param i    RNG seed, default NULL
+#' @param dist distance matrix
+#' @param dt   data
+#' @param r    fraction of data to use
+#' @param ni   number intervals
+#' @param po   percent overlap
+#' @param fn   function for aggregating data per vertex, specific to each data
+#' set
+#'
+#' @return
+#' @export
+#'
+#' @examples
+mapper.subsample <- function(i = NULL, dist, dt, r, ni, po, fn) {
+  set.seed(i)
+  subset <- subsample(dist, dt, r)
+  mds <- cmdscale(subset$dist)
+  rk.mds <- apply(mds, 2, rank)
+  do.call(fn, list(dist = subset$dist, samples = subset$data,
+                   ftr = list(rk.mds[,1], rk.mds[,2]), ni = ni, po = po))
+}
+
 write.graph <- function(tbl_graph, v2p, directory) {
   if (!dir.exists(directory)) {
     dir.create(directory, recursive = TRUE)
@@ -85,31 +156,62 @@ plot(rk.mds)
 # mapper call
 po <- 70
 ni <- c(15, 15)
-mpr <- mapper2D(js.dist, filter_values = list(rk.mds[,1], rk.mds[,2]),
-                percent_overlap = po,
-                num_intervals = ni)
-v2p <- vertex.2.points(mpr$points_in_vertex)
-v2p <- merge(v2p, gordon.samples, by.x = "point.name", by.y = "sample")
-v2p[, frac := 1 / .N, by = point]
-vertices <- v2p[, .(mean.knn = mean(knn),
-                    f.state = sum(diagnosis == "diarrhea") / .N,
-                    mean.t = mean(hour),
-                    size = .N),
-                by = .(vertex, vertex.name)]
-setorder(vertices, vertex)
-graf <- mapper.2.igraph(mpr) %>%
-  as_tbl_graph %>%
-  activate(nodes) %>%
-  left_join(vertices, by = c("name" = "vertex.name"))
-theme_set(theme_graph(base_family = "Helvetica"))
-ggraph(graf, "fr", niter = 1000) +
-  geom_edge_link0() +
-  geom_node_point(aes(color = f.state)) +
-  scale_color_distiller(palette = "Spectral") +
-  coord_equal()
-graf <- graf %>%
-  mutate(membership = components(.)$membership) %>%
-  mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
+ftr <- list(rk.mds[,1], rk.mds[,2])
+
+cholera.vertices <- function(map) {
+  map[, .(mean.knn = mean(knn),
+          f.state = sum(diagnosis == "diarrhea") / .N,
+          mean.t = mean(hour),
+          size = .N),
+      by = .(vertex, vertex.name)]
+}
+cholera.mapper <- function(dist, samples, ftr, ni, po) {
+  mpr <- mapper2.call(dist, samples, ftr = ftr, ni = ni, po = po)
+  vertices <- mpr$map[, .(mean.knn = mean(knn),
+                          f.state = sum(diagnosis == "diarrhea") / .N,
+                          mean.t = mean(hour),
+                          size = .N),
+                      by = .(vertex, vertex.name)]
+  setorder(vertices, vertex)
+  mpr$graph <- mpr$graph %>%
+    activate(nodes) %>%
+    left_join(vertices, by = c("name" = "vertex.name"))
+  mpr
+}
+
+mpr <- cholera.mapper(js.dist, gordon.samples,
+                      filter_values = ftr, num_intervals = ni,
+                      percent_overlap = po)
+
+plot.fstate <- function(graf) {
+  theme_set(theme_graph(base_family = "Helvetica"))
+  set.seed(1)
+  ggraph(graf, "fr", niter = 1000) +
+    geom_edge_link0() +
+    geom_node_point(aes(color = f.state)) +
+    scale_color_distiller(palette = "Spectral") +
+    coord_equal()
+}
+
+plot.fstate(mpr$graph)
+
+# validate
+nrep <- 10
+rs <- c(0.9, 0.5, 0.1)
+subsets <- lapply(rs, function(r, nrep, dist, dt, fn) {
+  lapply(seq_len(nrep), mapper.subsample, dist = dist, dt = dt,
+         r = r, ni = ni, po = po, fn = fn)
+}, nrep = nrep, dist = js.dist, dt = gordon.samples, fn = cholera.mapper)
+pl <- lapply(subsets, function(l) {
+  plots <- lapply(l, function(mpr) {
+    plot.fstate(mpr$graph) +
+      theme(legend.position = "none", plot.margin = unit(c(0, 0, 0, 0), "points"))
+  })
+  plot_grid(plotlist = plots, nrow = 2)
+})
+
+plot_grid(plotlist = pl, ncol = 1, labels = rs)
+
 # assign minima and basins
 graf <- graf %>% mutate(scaled.knn = mean.knn / size)
 graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
@@ -375,13 +477,14 @@ grafs <- mapply(function(graf, v2p) {
     mutate(basin = as.factor(basin))
 }, graf = grafs, v2p = v2p, SIMPLIFY = FALSE)
 set.seed(0)
-pl <- lapply(grafs, function(g) {
-  ggraph(g, "fr") +
+layouts <- lapply(grafs, create_layout, layout = "fr")
+pl <- mapply(function(g, lo) {
+  ggraph(g, "manual", node.positions = lo[, c("x", "y")]) +
     geom_edge_link0() +
     geom_node_point(aes(size = size, fill = basin), shape = 21) +
     theme_graph(base_family = "Helvetica") +
     theme(aspect.ratio = 1)
-})
+}, g = grafs, lo = layouts, SIMPLIFY = FALSE)
 plot_grid(plotlist = pl, labels = names(pl))
 
 # save
@@ -398,30 +501,40 @@ map <- merge(v2p$Bacteria, v2p$Eukaryota, suffixes = paste0(".", names(v2p)),
   .[, .(vertex.Bacteria = paste0("Bacteria", vertex.Bacteria),
         vertex.Eukaryota = paste0("Eukaryota", vertex.Eukaryota))] %>%
   unique
+
+# rename vertices to merge graphs
 grafs <- mapply(function(g, k) {
-  mutate(g, name = paste0(k, vertex), basin = paste0(k, basin))
+  mutate(g, name = paste0(k, vertex), basin = paste0(k, basin), type = k)
 }, g = grafs, k = names(grafs), SIMPLIFY = FALSE)
-merged.vertices <- lapply(grafs, activate, what = nodes) %>%
-  lapply(as.data.frame) %>%
-  lapply(select, name, basin) %>%
-  rbindlist(idcol = "kingdom") %>%
-  setcolorder(c("name", "basin", "kingdom")) %>%
-  setkey(name)
-map[, ":=" (basin.Bacteria = merged.vertices[vertex.Bacteria, basin],
-            basin.Eukaryota = merged.vertices[vertex.Eukaryota, basin])]
-basin2basin <- map[, .(connectivity = .N / (uniqueN(vertex.Bacteria) *
-                                              uniqueN(vertex.Eukaryota))),
-                   by = .(basin.Bacteria, basin.Eukaryota)]
-ggplot(basin2basin, aes(x = basin.Bacteria, y = basin.Eukaryota)) +
-  geom_tile(aes(fill = connectivity)) +
+
+# offset the euk vertices
+delx <- 2 * max(layouts$Bacteria$x) - min(layouts$Bacteria$x)
+merged.layout <- layouts$Eukaryota %>%
+  mutate(x = x + delx) %>%
+  rbind(layouts$Bacteria)
+merged.graf <- graph_join(grafs$Eukaryota, grafs$Bacteria)
+merged.graf <- merged.graf %>%
+  activate(edges) %>%
+  mutate(original = TRUE)
+for (i in seq(nrow(map))) {
+  merged.graf <- merged.graf +
+    edge(map[i,]$vertex.Bacteria, map[i,]$vertex.Eukaryota, original = FALSE)
+}
+merged.graf <- as_tbl_graph(merged.graf)
+merged.graf <- activate(merged.graf, nodes) %>%
+  arrange(type, basin, -size)
+ggraph(merged.graf, "linear", circular = TRUE) +
+  geom_edge_link0(data = function(d) filter(get_edges()(d), original == FALSE),
+                  alpha = 0.1) +
+  geom_node_point(aes(size = size, shape = type, color = basin)) +
+  theme_graph(base_family = "Helvetica") +
+  theme(aspect.ratio = 1)
+
+# connectivity table btwn bac and euk basins
+graf.df <- lapply(grafs, as.data.frame)
+map <- merge(map, graf.df$Bacteria, by.x = "vertex.Bacteria", by.y = "name")
+map <- merge(map, graf.df$Eukaryota, by.x = "vertex.Eukaryota", by.y = "name",
+             suffixes = paste0(".", names(grafs)))
+ggplot(map, aes(x = basin.Bacteria, y = basin.Eukaryota)) +
+  stat_bin_2d() +
   coord_equal()
-# merged.graph <- graph_from_data_frame(map, directed = FALSE,
-#                                       vertices = merged.vertices)
-# merged.graph <- as_tbl_graph(merged.graph) %>%
-#   activate(nodes)
-# xy <- layout_as_bipartite(merged.graph, types = as.data.frame(merged.graph)$kingdom == "Bacteria")
-# ggraph(merged.graph, "fr", coords = xy) +
-#   geom_edge_link0() +
-#   geom_node_point(aes(shape = kingdom, color = basin)) +
-#   theme_graph(base_family = "Helvetica") +
-#   theme(aspect.ratio = 1)
