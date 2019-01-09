@@ -11,6 +11,9 @@ library(igraph)
 library(tidygraph)
 library(cowplot)
 
+# validation parameters
+nrep <- 10             # number of replicates
+rs <- c(0.9, 0.5, 0.1) # downsampling ratios
 
 jsd.dir <- "jsds/"
 figs.dir <- "../../figures/tda/"
@@ -160,9 +163,7 @@ cholera.mapper <- function(dist, samples, ftr, ni, po) {
   mpr
 }
 
-mpr <- cholera.mapper(js.dist, gordon.samples,
-                      filter_values = ftr, num_intervals = ni,
-                      percent_overlap = po)
+mpr <- cholera.mapper(js.dist, gordon.samples, ftr, ni, po)
 
 plot.fstate <- function(graf) {
   theme_set(theme_graph(base_family = "Helvetica"))
@@ -177,8 +178,6 @@ plot.fstate <- function(graf) {
 plot.fstate(mpr$graph)
 
 # validate
-nrep <- 10
-rs <- c(0.9, 0.5, 0.1)
 subsets <- lapply(rs, function(r, nrep, dist, dt, ni, po) {
   lapply(seq_len(nrep), function(i, r, dist, dt, ni, po) {
     subsamp <- subsample(dist, dt, r)
@@ -258,23 +257,25 @@ plot(rk.mds)
 ftr <- list(rk.mds[, 1], rk.mds[, 2])
 ni <- c(30, 30)
 po <- 50
-mpr <- mapper2D(js.dist, ftr, num_intervals = ni, percent_overlap = po)
-v2p <- vertex.2.points(mpr$points_in_vertex)
-v2p <- merge(v2p, samples, by.x = "point.name", by.y = "sample")
-vertices <- v2p[, .(
-  f.subject = sum(subject == "A") / .N,
-  mean.knn = mean(kNN),
-  size = .N
-), by = .(vertex, vertex.name)]
 
-graf <- mapper.2.igraph(mpr)
-graf <- graf %>%
-  as_tbl_graph %>%
-  activate(nodes) %>%
-  left_join(vertices, by = c("name" = "vertex.name"))
-graf <- graf %>%
-  mutate(membership = components(.)$membership) %>%
-  mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
+david.mapper <- function(dist, samples, ftr, ni, po) {
+  mpr <- mapper2.call(dist, samples, ftr = ftr, ni = ni, po = po)
+  vertices <- mpr$map[, .(
+    f.subject = sum(subject == "A") / .N,
+    mean.knn = mean(kNN),
+    size = .N
+  ), by = .(vertex, vertex.name)]
+  setorder(vertices, vertex)
+  mpr$graph <- mpr$graph %>%
+    activate(nodes) %>%
+    left_join(vertices, by = c("name" = "vertex.name"))
+  mpr
+}
+
+# mpr <- mapper2D(js.dist, ftr, num_intervals = ni, percent_overlap = po)
+mpr <- david.mapper(js.dist, david.samples, ftr, ni, po)
+
+# validate
 
 #' Find basins of attraction:
 graf <- graf %>%
