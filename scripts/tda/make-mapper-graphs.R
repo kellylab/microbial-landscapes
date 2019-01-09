@@ -22,11 +22,8 @@ if (!dir.exists(output.dir)) dir.create(output.dir, recursive = TRUE)
 scripts.dir <- "../r/"
 for (script in list.files("utils/", full.names = TRUE)) source(script)
 
-#' Call Mapper2D and map vertices to original data points
+#' Construct function to call Mapper2D and map vertices to original data points
 #'
-#' @param dist    distance matrix
-#' @param samples data.table of original data
-#' @param ftr     list of 2 filter values
 #' @param ni      number intervals
 #' @param po      percent overlap
 #' @param vfn     optional, function for aggregating per-vertex data
@@ -35,25 +32,27 @@ for (script in list.files("utils/", full.names = TRUE)) source(script)
 #' @export
 #'
 #' @examples
-mapper2.call <- function(dist, samples, ftr, ni, po, vfn = NULL) {
-  mpr <- mapper2D(dist, filter_values = ftr, num_intervals = ni,
-                  percent_overlap = po)
-  v2p <- vertex.2.points(mpr$points_in_vertex)
-  v2p <- merge(v2p, samples, by.x = "point.name", by.y = "sample")
-  v2p[, frac := 1 / .N, by = point]
-  graf <- mapper.2.igraph(mpr) %>%
-    as_tbl_graph
-  graf <- graf %>%
-    mutate(membership = components(.)$membership) %>%
-    mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
-  if (!is.null(vfn)) {
-    vertices <- do.call(vfn, list(map = mpr$map))
-    setorder(vertices, vertex)
-    mpr$graph <- mpr$graph %>%
-      activate(nodes) %>%
-      left_join(vertices, by = c("name" = "vertex.name"))
+mapper2.call <- function(ni, po, vfn = NULL) {
+  function(dist, samples, ftr) {
+    mpr <- mapper2D(dist, filter_values = ftr, num_intervals = ni,
+                    percent_overlap = po)
+    v2p <- vertex.2.points(mpr$points_in_vertex)
+    v2p <- merge(v2p, samples, by.x = "point.name", by.y = "sample")
+    v2p[, frac := 1 / .N, by = point]
+    graf <- mapper.2.igraph(mpr) %>%
+      as_tbl_graph
+    graf <- graf %>%
+      mutate(membership = components(.)$membership) %>%
+      mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
+    if (!is.null(vfn)) {
+      vertices <- do.call(vfn, list(map = v2p))
+      setorder(vertices, vertex)
+      graf <- graf %>%
+        activate(nodes) %>%
+        left_join(vertices, by = c("name" = "vertex.name"))
+    }
+    list(graph = graf, map = v2p)
   }
-  list(graph = graf, map = v2p)
 }
 
 #' Random subset of distance matrix and data
@@ -75,6 +74,49 @@ subsample <- function(dist, dt, r = 0.9) {
   setkey(dt, sample)
   dt <- dt[samps]
   list(dist = dist, data = dt)
+}
+
+#' Construct a Mapper representation from a call function and downsampled data
+#'
+#' @param r    downsampling ratio
+#' @param dist original distance matrix
+#' @param dt   original sample data
+#' @param fn   function to wrap Mapper, takes distance matrix, sample data, and
+#'             filter values as arguments
+#'
+#' @return
+#' @export
+#'
+#' @examples
+subsample.mapper <- function(r, dist, dt, fn) {
+  subsamp <- subsample(dist, dt, r)
+  mds <- cmdscale(subsamp$dist)
+  rk.mds <- apply(mds, 2, rank)
+  do.call(fn, list(dist = subsamp$dist,
+                   samples = subsamp$data,
+                   ftr = list(rk.mds[,1], rk.mds[,2])))
+}
+
+plot.mapper.graph <- function(graf, edge = geom_edge_link0(),
+                              node = geom_node_point(), seed = NULL) {
+  theme_set(theme_graph(base_family = "Helvetica"))
+  set.seed(seed)
+  ggraph(graf, "fr", niter = 1000) +
+    edge +
+    node +
+    theme_graph(base_family = "Helvetica") +
+    theme(aspect.ratio = 1)
+}
+
+batch.plot <- function(subsets, fn) {
+  pl <- lapply(subsets, function(l) {
+    plots <- lapply(l, function(mpr) {
+      do.call(fn, list(graf = mpr$graph)) +
+        theme(legend.position = "none",
+              plot.margin = unit(c(0, 0, 0, 0), "points"))
+    })
+    plot_grid(plotlist = plots, nrow = 2)
+  })
 }
 
 write.graph <- function(tbl_graph, v2p, directory) {
@@ -153,49 +195,23 @@ cholera.vertices <- function(map) {
       by = .(vertex, vertex.name)]
 }
 
-cholera.mapper <- function(dist, samples, ftr, ni, po) {
-  mpr <- mapper2.call(dist, samples, ftr = ftr, ni = ni, po = po)
-  vertices <- cholera.vertices(mpr$map)
-  setorder(vertices, vertex)
-  mpr$graph <- mpr$graph %>%
-    activate(nodes) %>%
-    left_join(vertices, by = c("name" = "vertex.name"))
-  mpr
+cholera.mapper <- mapper2.call(ni, po, cholera.vertices)
+mpr <- cholera.mapper(js.dist, gordon.samples, ftr)
+
+plot.fstate <- function(graf, ...) {
+  plot.mapper.graph(graf, node = geom_node_point(aes(color = f.state)), ...) +
+    scale_color_distiller(palette = "Spectral")
 }
 
-mpr <- cholera.mapper(js.dist, gordon.samples, ftr, ni, po)
-
-plot.fstate <- function(graf) {
-  theme_set(theme_graph(base_family = "Helvetica"))
-  set.seed(1)
-  ggraph(graf, "fr", niter = 1000) +
-    geom_edge_link0() +
-    geom_node_point(aes(color = f.state)) +
-    scale_color_distiller(palette = "Spectral") +
-    coord_equal()
-}
-
-plot.fstate(mpr$graph)
+plot.fstate(mpr$graph, seed = 1)
 
 # validate
-subsets <- lapply(rs, function(r, nrep, dist, dt, ni, po) {
-  lapply(seq_len(nrep), function(i, r, dist, dt, ni, po) {
-    subsamp <- subsample(dist, dt, r)
-    mds <- cmdscale(subsamp$dist)
-    rk.mds <- apply(mds, 2, rank)
-    cholera.mapper(subsamp$dist, subsamp$data,
-                   ftr = list(rk.mds[,1], rk.mds[,2]), ni, po)
-  }, r = r, dist = dist, dt = dt, ni = ni, po = po)
-}, nrep = nrep, dist = js.dist, dt = gordon.samples, ni, po)
+subsets <- lapply(rs, function(r, nrep, dist, dt) {
+  fn <- function(i) subsample.mapper(r, dist, dt, cholera.mapper)
+  lapply(seq_len(nrep), fn)
+}, nrep = nrep, dist = js.dist, dt = gordon.samples)
 
-pl <- lapply(subsets, function(l) {
-  plots <- lapply(l, function(mpr) {
-    plot.fstate(mpr$graph) +
-      theme(legend.position = "none", plot.margin = unit(c(0, 0, 0, 0), "points"))
-  })
-  plot_grid(plotlist = plots, nrow = 2)
-})
-
+pl <- batch.plot(subsets, plot.fstate)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 # assign minima and basins
@@ -258,24 +274,27 @@ ftr <- list(rk.mds[, 1], rk.mds[, 2])
 ni <- c(30, 30)
 po <- 50
 
-david.mapper <- function(dist, samples, ftr, ni, po) {
-  mpr <- mapper2.call(dist, samples, ftr = ftr, ni = ni, po = po)
-  vertices <- mpr$map[, .(
-    f.subject = sum(subject == "A") / .N,
-    mean.knn = mean(kNN),
-    size = .N
-  ), by = .(vertex, vertex.name)]
-  setorder(vertices, vertex)
-  mpr$graph <- mpr$graph %>%
-    activate(nodes) %>%
-    left_join(vertices, by = c("name" = "vertex.name"))
-  mpr
+david.vertices <- function(map) {
+  map[, .(f.subject = sum(subject == "A") / .N,
+          mean.knn = mean(kNN),
+          size = .N),
+      by = .(vertex, vertex.name)]
+}
+david.mapper <- mapper2.call(ni, po, david.vertices)
+mpr <- david.mapper(js.dist, david.samples, ftr)
+
+plot.fsubject <- function(graf) {
+  plot.mapper.graph(graf, node = geom_node_point(aes(color = f.subject))) +
+    scale_color_distiller(palette = "Spectral")
 }
 
-# mpr <- mapper2D(js.dist, ftr, num_intervals = ni, percent_overlap = po)
-mpr <- david.mapper(js.dist, david.samples, ftr, ni, po)
-
 # validate
+subsets <- lapply(rs, function(r, nrep, dist, dt) {
+  fn <- function(i) subsample.mapper(r, dist, dt, david.mapper)
+  lapply(seq_len(nrep), fn)
+}, nrep = nrep, dist = js.dist, dt = david.samples)
+pl <- batch.plot(subsets, plot.fsubject)
+plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 #' Find basins of attraction:
 graf <- graf %>%
