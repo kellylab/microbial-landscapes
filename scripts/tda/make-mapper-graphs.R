@@ -47,6 +47,7 @@ mapper2.call <- function(ni, po, vfn = NULL) {
     if (!is.null(vfn)) {
       vertices <- do.call(vfn, list(map = v2p))
       setorder(vertices, vertex)
+      # browser()
       graf <- graf %>%
         activate(nodes) %>%
         left_join(vertices, by = c("name" = "vertex.name"))
@@ -97,10 +98,26 @@ subsample.mapper <- function(r, dist, dt, fn) {
                    ftr = list(rk.mds[,1], rk.mds[,2])))
 }
 
-plot.mapper.graph <- function(graf, edge = geom_edge_link0(),
-                              node = geom_node_point(), seed = NULL) {
+validate <- function(dist, dt, fn, rs, nrep) {
+  lapply(rs, function(r, nrep, dist, dt, fn) {
+    lapply(seq_len(nrep), function(i, r, dist, dt, fn) {
+      subsample.mapper(r, dist, dt, fn)
+    }, r, dist, dt, fn)
+  }, nrep, dist, dt, fn)
+}
+
+plot.mapper.graph <- function(graf, 
+                              edge = geom_edge_link0(),
+                              node = geom_node_point(), 
+                              exclude.singletons = FALSE,
+                              seed = NULL) {
   theme_set(theme_graph(base_family = "Helvetica"))
   set.seed(seed)
+  if (exclude.singletons) {
+    graf <- graf %>% 
+      activate(nodes) %>% 
+      filter(!in.singleton)
+  }
   ggraph(graf, "fr", niter = 1000) +
     edge +
     node +
@@ -206,11 +223,7 @@ plot.fstate <- function(graf, ...) {
 plot.fstate(mpr$graph, seed = 1)
 
 # validate
-subsets <- lapply(rs, function(r, nrep, dist, dt) {
-  fn <- function(i) subsample.mapper(r, dist, dt, cholera.mapper)
-  lapply(seq_len(nrep), fn)
-}, nrep = nrep, dist = js.dist, dt = gordon.samples)
-
+subsets <- validate(js.dist, gordon.samples, gordon.mapper, rs, nrep)
 pl <- batch.plot(subsets, plot.fstate)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
@@ -289,10 +302,7 @@ plot.fsubject <- function(graf) {
 }
 
 # validate
-subsets <- lapply(rs, function(r, nrep, dist, dt) {
-  fn <- function(i) subsample.mapper(r, dist, dt, david.mapper)
-  lapply(seq_len(nrep), fn)
-}, nrep = nrep, dist = js.dist, dt = david.samples)
+subsets <- validate(js.dist, david.samples, david.mapper, rs, nrep)
 pl <- batch.plot(subsets, plot.fsubject)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
@@ -341,33 +351,40 @@ plot(rk.mds)
 #' Mapper call:
 po <- 60
 ni <- c(20, 20)
-nb <- 10
+proc.vertices <- function(map) {
+  map[, .(size = .N, 
+          f.bats = sum(site == "bats") / .N,
+          mean.depth = mean(depth, na.rm = TRUE),
+          mean.temp = mean(temp, na.rm = TRUE),
+          mean.sal = mean(sal, na.rm = TRUE),
+          mean.calmonth = mean(cal.month, na.rm = TRUE)#,
+          # median.depth = as.double(median(depth, na.rm = TRUE))#,
+          # median.temp = median(temp, na.rm = TRUE),
+          # median.sal = median(sal, na.rm = TRUE),
+          # mean.knn = mean(knn, na.rm = TRUE)
+          ), 
+      by = .(vertex, vertex.name)]
+}
+proc.mapper <- mapper2.call(ni, po, proc.vertices)
+# nb <- 10
 ftr <- list(rk.mds[, 1], rk.mds[, 2])
-mpr <- mapper2D(dist.mat, ftr,
-                percent_overlap = po, num_intervals = ni,
-                num_bins_when_clustering = nb)
-v2p <- vertex.2.points(mpr$points_in_vertex)
-v2p$sample <- rownames(dist.mat)[v2p$point]
-setkey(v2p, sample)
-setkey(samples, sample)
-v2p <- samples[v2p]
-v2p[, depth := as.numeric(depth)]
-vertices <- v2p[, .(size = .N,
-                    f.bats = sum(site == "bats") / .N,
-                    mean.depth = mean(depth, na.rm = TRUE),
-                    mean.temp = mean(temp, na.rm = TRUE),
-                    mean.sal = mean(sal, na.rm = TRUE),
-                    mean.calmonth = mean(cal.month, na.rm = TRUE),
-                    median.depth = median(depth, na.rm = TRUE),
-                    median.temp = median(temp, na.rm = TRUE),
-                    median.sal = median(sal, na.rm = TRUE),
-                    mean.knn = mean(knn, na.rm = TRUE)
-                    ),
-                by = .(vertex, vertex.name)]
-graf <- mapper.2.igraph(mpr) %>%
-  as_tbl_graph %>%
-  left_join(vertices, by = c("name" = "vertex.name")) %>%
-  mutate(scaled.knn = mean.knn / size)
+mpr <- proc.mapper(dist.mat, prochlorococcus.samples, ftr)
+
+plot.depth <- function(graf) {
+  plot.mapper.graph(graf, 
+                    node = geom_node_point(aes(color = mean.depth, size = size)),
+                    exclude.singletons = TRUE,
+                    seed = 0) +
+    scale_color_distiller(palette = "Blues", direction = 1)
+}
+
+plot.depth(mpr$graph)
+
+# validate
+subsets <- validate(dist.mat, prochlorococcus.samples, proc.mapper, rs, nrep)
+pl <- batch.plot(subsets, plot.depth)
+plot_grid(plotlist = pl, ncol = 1, labels = rs)
+
 graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
 graf <- graf %>%
   mutate(membership = components(.)$membership) %>%
