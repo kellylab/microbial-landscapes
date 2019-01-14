@@ -77,45 +77,54 @@ subsample <- function(dist, dt, r = 0.9) {
   list(dist = dist, data = dt)
 }
 
-#' Construct a Mapper representation from a call function and downsampled data
+#' Validate Mapper representation by subsampling by given ratios some number of
+#' times
 #'
-#' @param r    downsampling ratio
-#' @param dist original distance matrix
-#' @param dt   original sample data
-#' @param fn   function to wrap Mapper, takes distance matrix, sample data, and
-#'             filter values as arguments
+#' @param dist  original distance matrix
+#' @param dt    original sample data
+#' @param fn    function to wrap Mapper
+#' @param rs    vector of downsampling coefficients
+#' @param nrep  number of replicates per coefficient
 #'
-#' @return
+#' @return list of list of Mapper representations and vertex-sample maps
 #' @export
 #'
 #' @examples
-subsample.mapper <- function(r, dist, dt, fn) {
-  subsamp <- subsample(dist, dt, r)
-  mds <- cmdscale(subsamp$dist)
-  rk.mds <- apply(mds, 2, rank)
-  do.call(fn, list(dist = subsamp$dist,
-                   samples = subsamp$data,
-                   ftr = list(rk.mds[,1], rk.mds[,2])))
-}
-
 validate <- function(dist, dt, fn, rs, nrep) {
   lapply(rs, function(r, nrep, dist, dt, fn) {
     lapply(seq_len(nrep), function(i, r, dist, dt, fn) {
-      subsample.mapper(r, dist, dt, fn)
+      subsamp <- subsample(dist, dt, r)
+      mds <- cmdscale(subsamp$dist)
+      rk.mds <- apply(mds, 2, rank)
+      do.call(fn, list(dist = subsamp$dist,
+                       samples = subsamp$data,
+                       ftr = list(rk.mds[,1], rk.mds[,2])))
     }, r, dist, dt, fn)
   }, nrep, dist, dt, fn)
 }
 
-plot.mapper.graph <- function(graf, 
+#' Basic FR layout and plot of Mapper graph
+#'
+#' @param graf
+#' @param edge
+#' @param node
+#' @param exclude.singletons
+#' @param seed
+#'
+#' @return ggplot object
+#' @export
+#'
+#' @examples
+plot.mapper.graph <- function(graf,
                               edge = geom_edge_link0(),
-                              node = geom_node_point(), 
+                              node = geom_node_point(),
                               exclude.singletons = FALSE,
                               seed = NULL) {
   theme_set(theme_graph(base_family = "Helvetica"))
   set.seed(seed)
   if (exclude.singletons) {
-    graf <- graf %>% 
-      activate(nodes) %>% 
+    graf <- graf %>%
+      activate(nodes) %>%
       filter(!in.singleton)
   }
   ggraph(graf, "fr", niter = 1000) +
@@ -125,6 +134,15 @@ plot.mapper.graph <- function(graf,
     theme(aspect.ratio = 1)
 }
 
+#' Plot downsampled Mapper graphs in a grid
+#'
+#' @param subsets  list of lists of downsampled Mappers
+#' @param fn       function used for plotting each downsampled Mapper
+#'
+#' @return
+#' @export         list of ggplot objects
+#'
+#' @examples
 batch.plot <- function(subsets, fn) {
   pl <- lapply(subsets, function(l) {
     plots <- lapply(l, function(mpr) {
@@ -216,15 +234,18 @@ cholera.mapper <- mapper2.call(ni, po, cholera.vertices)
 mpr <- cholera.mapper(js.dist, gordon.samples, ftr)
 
 plot.fstate <- function(graf, ...) {
-  plot.mapper.graph(graf, node = geom_node_point(aes(color = f.state)), ...) +
+  plot.mapper.graph(graf,
+                    node = geom_node_point(aes(color = f.state, size = size)),
+                    ...) +
     scale_color_distiller(palette = "Spectral")
 }
 
 plot.fstate(mpr$graph, seed = 1)
 
 # validate
-subsets <- validate(js.dist, gordon.samples, gordon.mapper, rs, nrep)
-pl <- batch.plot(subsets, plot.fstate)
+subsets <- validate(js.dist, gordon.samples, cholera.mapper, rs, nrep)
+pl <- batch.plot(subsets,
+                 function(graf) plot.fstate(graf) + scale_size_area(max_size = 2))
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 # assign minima and basins
@@ -297,13 +318,17 @@ david.mapper <- mapper2.call(ni, po, david.vertices)
 mpr <- david.mapper(js.dist, david.samples, ftr)
 
 plot.fsubject <- function(graf) {
-  plot.mapper.graph(graf, node = geom_node_point(aes(color = f.subject))) +
+  plot.mapper.graph(graf,
+                    node = geom_node_point(aes(color = f.subject, size = size))) +
     scale_color_distiller(palette = "Spectral")
 }
 
 # validate
 subsets <- validate(js.dist, david.samples, david.mapper, rs, nrep)
-pl <- batch.plot(subsets, plot.fsubject)
+pl <- batch.plot(subsets, function(graf) {
+  plot.fsubject(graf) + scale_size_area(max_size = 2)
+})
+
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 #' Find basins of attraction:
@@ -352,17 +377,13 @@ plot(rk.mds)
 po <- 60
 ni <- c(20, 20)
 proc.vertices <- function(map) {
-  map[, .(size = .N, 
+  map[, .(size = .N,
           f.bats = sum(site == "bats") / .N,
           mean.depth = mean(depth, na.rm = TRUE),
           mean.temp = mean(temp, na.rm = TRUE),
           mean.sal = mean(sal, na.rm = TRUE),
-          mean.calmonth = mean(cal.month, na.rm = TRUE)#,
-          # median.depth = as.double(median(depth, na.rm = TRUE))#,
-          # median.temp = median(temp, na.rm = TRUE),
-          # median.sal = median(sal, na.rm = TRUE),
-          # mean.knn = mean(knn, na.rm = TRUE)
-          ), 
+          mean.calmonth = mean(cal.month, na.rm = TRUE)
+          ),
       by = .(vertex, vertex.name)]
 }
 proc.mapper <- mapper2.call(ni, po, proc.vertices)
@@ -371,7 +392,7 @@ ftr <- list(rk.mds[, 1], rk.mds[, 2])
 mpr <- proc.mapper(dist.mat, prochlorococcus.samples, ftr)
 
 plot.depth <- function(graf) {
-  plot.mapper.graph(graf, 
+  plot.mapper.graph(graf,
                     node = geom_node_point(aes(color = mean.depth, size = size)),
                     exclude.singletons = TRUE,
                     seed = 0) +
@@ -382,7 +403,9 @@ plot.depth(mpr$graph)
 
 # validate
 subsets <- validate(dist.mat, prochlorococcus.samples, proc.mapper, rs, nrep)
-pl <- batch.plot(subsets, plot.depth)
+pl <- batch.plot(subsets, function(graf) {
+  plot.depth(graf) + scale_size_area(max_size = 2)
+})
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
