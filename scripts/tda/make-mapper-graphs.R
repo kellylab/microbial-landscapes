@@ -119,7 +119,9 @@ plot.mapper.graph <- function(graf,
                               edge = geom_edge_link0(),
                               node = geom_node_point(),
                               exclude.singletons = FALSE,
-                              seed = NULL) {
+                              seed = NULL,
+                              layout = "fr",
+                              ...) {
   theme_set(theme_graph(base_family = "Helvetica"))
   set.seed(seed)
   if (exclude.singletons) {
@@ -127,11 +129,28 @@ plot.mapper.graph <- function(graf,
       activate(nodes) %>%
       filter(!in.singleton)
   }
-  ggraph(graf, "fr", niter = 1000) +
+  if (layout == "fr") {
+    g <- ggraph(graf, layout, niter = 1000)
+  } else {
+    g <- ggraph(graf, layout, ...)
+  }
+  g +
     edge +
     node +
     theme_graph(base_family = "Helvetica") +
     theme(aspect.ratio = 1)
+}
+
+plot.mapper.linear <- function(vatt, palette = "Spectral", direction = -1) {
+  function(graf) {
+    plot.mapper.graph(graf,
+                      node = geom_node_point(aes_string(color = vatt),
+                                             size = 0.5),
+                      edge = geom_edge_arc0(width = 0.1),
+                      layout = "linear",
+                      sort.by = vatt) +
+      scale_color_distiller(palette = palette, direction = direction)
+  }
 }
 
 #' Plot downsampled Mapper graphs in a grid
@@ -244,8 +263,8 @@ plot.fstate(mpr$graph, seed = 1)
 
 # validate
 subsets <- validate(js.dist, gordon.samples, cholera.mapper, rs, nrep)
-pl <- batch.plot(subsets,
-                 function(graf) plot.fstate(graf) + scale_size_area(max_size = 2))
+plot.fstate.linear <- plot.mapper.linear("f.state")
+pl <- batch.plot(subsets, plot.fstate.linear)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 # assign minima and basins
@@ -325,10 +344,8 @@ plot.fsubject <- function(graf) {
 
 # validate
 subsets <- validate(js.dist, david.samples, david.mapper, rs, nrep)
-pl <- batch.plot(subsets, function(graf) {
-  plot.fsubject(graf) + scale_size_area(max_size = 2)
-})
-
+plot.fsubject.linear <- plot.mapper.linear("f.subject")
+pl <- batch.plot(subsets, plot.fsubject.linear)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 #' Find basins of attraction:
@@ -403,9 +420,9 @@ plot.depth(mpr$graph)
 
 # validate
 subsets <- validate(dist.mat, prochlorococcus.samples, proc.mapper, rs, nrep)
-pl <- batch.plot(subsets, function(graf) {
-  plot.depth(graf) + scale_size_area(max_size = 2)
-})
+plot.depth.linear <- plot.mapper.linear("mean.depth", palette = "Blues",
+                                        direction = 1)
+pl <- batch.plot(subsets, plot.depth.linear)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
