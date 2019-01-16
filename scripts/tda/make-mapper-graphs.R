@@ -1,19 +1,18 @@
 # setup -------------------------------------------------------------------
 
-
 library(data.table)
 library(tidyverse)
-library(data.table)
-library(philentropy)
 library(TDAmapper)
 library(ggraph)
 library(igraph)
 library(tidygraph)
 library(cowplot)
+library(BimodalIndex)
 
 # validation parameters
 nrep <- 10             # number of replicates
 rs <- c(0.9, 0.5, 0.1) # downsampling ratios
+rs <- seq(from = 0.1, to = 0.9, by = 0.1)
 
 jsd.dir <- "jsds/"
 figs.dir <- "../../figures/tda/"
@@ -153,6 +152,53 @@ plot.mapper.linear <- function(vatt, palette = "Spectral", direction = -1) {
   }
 }
 
+#' Return a function that calculates the bimodality index of some vertex attribute
+#' over a Mapper graph
+#'
+#' @param vatt string, name of the vertex attribute
+#'
+#' @return a function that takes a tbl_graph as its argument
+#' @export
+#'
+#' @examples
+vertex.bimodality <- function(vatt) {
+  function(tbl_graph) {
+    v <- tbl_graph %>%
+      activate(nodes) %>%
+      as.data.frame %>%
+      select(vatt) %>%
+      t %>%
+      as.matrix # 1-row matrix
+    # if all 0 and 1 Mclust in BI calc will fail
+    if (all(v[1,] == 0 | v[1,] == 1)) {
+      # v[1,] <- v[1,] + runif(ncol(v)) * 0.00001* (max(v[1,] - min(v[1,]))) # salt
+      bi <- NA_real_
+    } else {
+      result <- bimodalIndex(v, verbose = FALSE)
+      bi <- result$BI
+    }
+    bi
+  }
+}
+
+batch.bi <- function(subsets, fn, idcol = "id") {
+  x <- lapply(subsets, function(l) {
+    f2 <- function(l) fn(l$graph)
+    reps <- sapply(l, f2)
+    data.frame(rep = seq_along(reps), bi = reps)
+  })
+  rbindlist(x, idcol = idcol)
+}
+
+plot.bi.validation <- function(bis, bi.0) {
+  ggplot(bis, aes(x = r, y = bi)) +
+    # geom_point() +
+    # geom_boxplot(aes(group = as.character(r))) +
+    stat_summary(fun.data = mean_se) +
+    geom_hline(yintercept = bi.0, color = "blue") +
+    theme_cowplot()
+}
+
 #' Plot downsampled Mapper graphs in a grid
 #'
 #' @param subsets  list of lists of downsampled Mappers
@@ -251,7 +297,6 @@ cholera.vertices <- function(map) {
 
 cholera.mapper <- mapper2.call(ni, po, cholera.vertices)
 mpr <- cholera.mapper(js.dist, gordon.samples, ftr)
-
 plot.fstate <- function(graf, ...) {
   plot.mapper.graph(graf,
                     node = geom_node_point(aes(color = f.state, size = size)),
@@ -263,9 +308,14 @@ plot.fstate(mpr$graph, seed = 1)
 
 # validate
 subsets <- validate(js.dist, gordon.samples, cholera.mapper, rs, nrep)
-plot.fstate.linear <- plot.mapper.linear("f.state")
-pl <- batch.plot(subsets, plot.fstate.linear)
-plot_grid(plotlist = pl, ncol = 1, labels = rs)
+fstate.bi <- vertex.bimodality("f.state")
+bi.0 <- fstate.bi(mpr$graph)
+bis <- batch.bi(subsets, fstate.bi, "r")
+bis[, r := rs[r]]
+plot.bi.validation(bis, bi.0)
+# plot.fstate.linear <- plot.mapper.linear("f.state")
+# pl <- batch.plot(subsets, plot.fstate.linear)
+# plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 # assign minima and basins
 graf <- graf %>% mutate(scaled.knn = mean.knn / size)
