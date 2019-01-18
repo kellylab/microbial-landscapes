@@ -192,8 +192,6 @@ batch.bi <- function(subsets, fn, idcol = "id") {
 
 plot.bi.validation <- function(bis, bi.0) {
   ggplot(bis, aes(x = r, y = bi)) +
-    # geom_point() +
-    # geom_boxplot(aes(group = as.character(r))) +
     stat_summary(fun.data = mean_se) +
     geom_hline(yintercept = bi.0, color = "blue") +
     theme_cowplot()
@@ -394,9 +392,15 @@ plot.fsubject <- function(graf) {
 
 # validate
 subsets <- validate(js.dist, david.samples, david.mapper, rs, nrep)
-plot.fsubject.linear <- plot.mapper.linear("f.subject")
-pl <- batch.plot(subsets, plot.fsubject.linear)
-plot_grid(plotlist = pl, ncol = 1, labels = rs)
+fsubject.bi <- vertex.bimodality("f.subject")
+bi.0 <- fsubject.bi(mpr$graph)
+bis <- batch.bi(subsets, fsubject.bi, "r")
+bis[, r := rs[r]]
+plot.bi.validation(bis, bi.0)
+
+# plot.fsubject.linear <- plot.mapper.linear("f.subject")
+# pl <- batch.plot(subsets, plot.fsubject.linear)
+# plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 #' Find basins of attraction:
 graf <- graf %>%
