@@ -10,7 +10,7 @@ library(cowplot)
 library(BimodalIndex)
 
 # validation parameters
-nrep <- 10             # number of replicates
+nrep <- 100             # number of replicates
 rs <- c(0.9, 0.5, 0.1) # downsampling ratios
 rs <- seq(from = 0.1, to = 0.9, by = 0.1)
 
@@ -121,7 +121,6 @@ plot.mapper.graph <- function(graf,
                               seed = NULL,
                               layout = "fr",
                               ...) {
-  theme_set(theme_graph(base_family = "Helvetica"))
   set.seed(seed)
   if (exclude.singletons) {
     graf <- graf %>%
@@ -194,6 +193,7 @@ plot.bi.validation <- function(bis, bi.0) {
   ggplot(bis, aes(x = r, y = bi)) +
     stat_summary(fun.data = mean_se) +
     geom_hline(yintercept = bi.0, color = "blue") +
+    labs(x = "downsampling ratio", y = "bimodal index") +
     theme_cowplot()
 }
 
@@ -310,7 +310,8 @@ fstate.bi <- vertex.bimodality("f.state")
 bi.0 <- fstate.bi(mpr$graph)
 bis <- batch.bi(subsets, fstate.bi, "r")
 bis[, r := rs[r]]
-plot.bi.validation(bis, bi.0)
+pcholera.bi <- plot.bi.validation(bis, bi.0)
+pbcholera.bi
 # plot.fstate.linear <- plot.mapper.linear("f.state")
 # pl <- batch.plot(subsets, plot.fstate.linear)
 # plot_grid(plotlist = pl, ncol = 1, labels = rs)
@@ -396,7 +397,8 @@ fsubject.bi <- vertex.bimodality("f.subject")
 bi.0 <- fsubject.bi(mpr$graph)
 bis <- batch.bi(subsets, fsubject.bi, "r")
 bis[, r := rs[r]]
-plot.bi.validation(bis, bi.0)
+pdavid.bi <- plot.bi.validation(bis, bi.0)
+pdavid.bi
 
 # plot.fsubject.linear <- plot.mapper.linear("f.subject")
 # pl <- batch.plot(subsets, plot.fsubject.linear)
@@ -414,6 +416,13 @@ graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE,
   mutate(is.extremum = mapply(function(b, x) if (x) NA else b,
                         b = is.extremum, x = in.singleton))
 write.graph(graf, v2p[, .(point.name, vertex)], paste0(output.dir, "david/"))
+
+
+# combined validation plot -----------------------------------------
+plot_grid(pcholera.bi + labs(title = "cholera"),
+          pdavid.bi + labs(title = "2 healthy"), nrow = 2, align = "v")
+
+
 
 # prochloroccoccus --------------------------------------------------------
 
