@@ -18,17 +18,29 @@ prochlorococcus.mapper$graph <- prochlorococcus.mapper$graph %>%
   mutate(basin = as.factor(basin))
 prochlorococcus.v2p <- merge.mpr.samples(prochlorococcus.mapper,
                                          prochlorococcus.samples)
-set.seed(0)
-lo <- prochlorococcus.mapper$graph %>%
-  activate(nodes) %>%
-  filter(!in.singleton) %>%
-  create_layout("fr", niter = 1000)
+plotter <- function(v) {
+  plot.mapper.graph(prochlorococcus.mapper$graph,
+                    node = geom_node_point(aes_(size = ~size, fill = v),
+                                           shape = 21),
+                    seed = 0,
+                    exclude.singletons = TRUE) +
+    guides(size = FALSE)
+}
+# set.seed(0)
+# lo <- prochlorococcus.mapper$graph %>%
+#   activate(nodes) %>%
+#   filter(!in.singleton) %>%
+#   create_layout("fr", niter = 1000)
 
 # temp ----------------------------------------------------------
 
 
-theme_set(theme_graph(base_family = "Helvetica", base_size = 10))
+# theme_set(theme_graph(base_family = "Helvetica", base_size = 10))
 #' Composition varies continuously with temperature
+plotter(~mean.temp) +
+  scale_fill_distiller(palette = "Spectral") +
+  labs(fill = "C")
+
 ggraph(lo) +
   geom_edge_link0() +
   geom_node_point(aes(size = size, fill = mean.temp), shape = 21) +

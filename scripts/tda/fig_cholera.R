@@ -17,71 +17,49 @@ source(paste0(scripts.dir, "load_cholera_data.R"))
 cholera.mapper <- read.mapper.graph(paste0(output.dir, "cholera"))
 cholera.v2p <- merge.mpr.samples(cholera.mapper, gordon.samples)
 # lay out Mapper graph without singletons
-set.seed(1)
-lo <- cholera.mapper$graph %>%
-  activate(nodes) %>%
-  filter(!in.singleton) %>%
-  create_layout("fr", niter = 1000)
-theme_set(theme_graph(base_family = "Helvetica"))
-# color settings for basins of attraction
+plotter <- function(v) {
+  plot.mapper.graph(cholera.mapper$graph,
+                    node = geom_node_point(aes_(size = ~size, fill = v),
+                                           shape = 21),
+                    seed = 1,
+                    exclude.singletons = TRUE) +
+    guides(size = FALSE) +
+    coord_equal()
+}
 basin.palette <- "Set3"
 na.color <- "grey50"
-subplots <- list() # list of subplots
 
 # fraction diarrhea -------------------------------------------------------
 
-
-ggraph(lo) + # color by fraction samples marked diarrhea
-  geom_edge_link0() +
-  geom_node_point(aes(fill = f.state, size = size),
-                  data = function(df) filter(df, !in.singleton), shape = 21) +
+plotter(~f.state) +
   scale_fill_distiller(palette = "Spectral") +
-  labs(fill = "fraction\ndiarrhea") +
-  guides(size = FALSE) +
-  theme_graph(base_family = "Helvetica") +
-  coord_equal()
-subplots$fstate <- last_plot()
+  labs(fill = "fraction\ndiarrhea")
+fstate <- last_plot()
 
 # density -----------------------------------------------------------------
 
 
-ggraph(lo) +
-  geom_edge_link0() +
-  geom_node_point(aes(size = size, color = scaled.knn)) +
-  scale_color_distiller(palette = "Greys") +
-  labs(color = "Q") +
-  theme_graph(base_family = "Helvetica") +
-  coord_equal() +
-  guides(size = FALSE) +
-  scale_edge_color_distiller(palette = "Greys")
-subplots$density <- last_plot()
+# ggraph(lo) +
+#   geom_edge_link0() +
+#   geom_node_point(aes(size = size, color = scaled.knn)) +
+#   scale_color_distiller(palette = "Greys") +
+#   labs(color = "Q") +
+#   theme_graph(base_family = "Helvetica") +
+#   coord_equal() +
+#   guides(size = FALSE) +
+#   scale_edge_color_distiller(palette = "Greys")
+# subplots$density <- last_plot()
 
 
 # basins ------------------------------------------------------------------
 
-
-ggraph(lo) +
-  geom_edge_link0() +
-  geom_node_point(aes(fill = as.factor(basin), size = size),
-                  # data = function(df) filter(df, !in.singleton),
-                  shape = 21) +
-  labs(fill = "basin") +
-  scale_fill_brewer(palette = basin.palette, na.value = na.color) +
-  theme_graph(base_family = "Helvetica") +
-  coord_equal() +
-  guides(size = FALSE)
-subplots$basin <- last_plot()
-
+plotter(~as.factor(basin)) +
+  scale_fill_brewer(palette = basin.palette, na.value = na.color)
+basin <- last_plot()
 
 # basin time series -------------------------------------------------------
 
-
 theme_set(theme_cowplot())
-basins <- as.data.frame(activate(cholera.mapper$graph, nodes))$basin %>%
-  unique %>%
-  as.numeric %>%
-  sort(na.last = TRUE) %>%
-  as.character
 p2basin <- cholera.v2p[, .N, by = .(subject, diagnosis, id, hour, basin)]
 p2basin[, time := mapply(function(diagnosis, id, hour) {
   if (diagnosis == "diarrhea") {
@@ -107,7 +85,7 @@ p2basin["diarrhea"] %>%
                     drop = FALSE) +
   theme(axis.text.y = element_blank(),
         axis.title.y = element_blank(), strip.placement = "outside")
-subplots$basin.series <- last_plot()
+basin.series <- last_plot()
 
 # basin distribution ------------------------------------------------------
 
@@ -124,15 +102,14 @@ d2basin["diarrhea"] %>%
   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
         axis.title.y = element_blank(), panel.spacing = unit(1, "points")) +
   labs(fill = "basin", y = "fraction samples") #+
-subplots$basin.distribs <- last_plot()
-subplots$basin.combined <- plot_grid(subplots$basin.series +
-                                       theme(legend.position = "none"),
-                                     subplots$basin.distribs +
-                                       theme(strip.background = element_blank(),
-                                             strip.text = element_blank(),
-                                             legend.position = "none"),
-                                     align = "hv", axis = "t"
-                                     )
+basin.distribs <- last_plot()
+basin.combined <- plot_grid(basin.series + theme(legend.position = "none"),
+                            basin.distribs +
+                              theme(strip.background = element_blank(),
+                                    strip.text = element_blank(),
+                                    legend.position = "none"),
+                            align = "hv", axis = "t"
+                            )
 
 # basin correlation function ----------------------------------------------
 
@@ -154,16 +131,16 @@ cholera.persistence["diarrhea"] %>%
   coord_cartesian(ylim = c(0, 1)) +
   scale_y_continuous(breaks = c(0, 0.5, 1)) +
   labs(x = "interval (hours)", y = "correlation")
-subplots$correlation <- last_plot()
+correlation <- last_plot()
 
 
 # combined figure ---------------------------------------------------------
 
 
-plot_grid(plot_grid(subplots$fstate, subplots$basin,
+plot_grid(plot_grid(fstate, basin,
                     labels = "AUTO", align = "h", nrow = 1),
-          subplots$basin.combined,
-          subplots$correlation + theme(legend.position = "none"),
+          basin.combined,
+          correlation + theme(legend.position = "none"),
           rel_heights = c(2, 1, 1),
           labels = c("", "C", "D"),
           label_y = c(1, 1.2, 1),

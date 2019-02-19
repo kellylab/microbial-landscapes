@@ -312,6 +312,7 @@ bis <- batch.bi(subsets, fstate.bi, "r")
 bis[, r := rs[r]]
 pcholera.bi <- plot.bi.validation(bis, bi.0)
 pbcholera.bi
+
 # plot.fstate.linear <- plot.mapper.linear("f.state")
 # pl <- batch.plot(subsets, plot.fstate.linear)
 # plot_grid(plotlist = pl, ncol = 1, labels = rs)
@@ -383,7 +384,7 @@ david.vertices <- function(map) {
       by = .(vertex, vertex.name)]
 }
 david.mapper <- mapper2.call(ni, po, david.vertices)
-mpr <- david.mapper(js.dist, david.samples, ftr)
+mpr <- david.mapper(js.dist, samples, ftr)
 
 plot.fsubject <- function(graf) {
   plot.mapper.graph(graf,
@@ -392,7 +393,7 @@ plot.fsubject <- function(graf) {
 }
 
 # validate
-subsets <- validate(js.dist, david.samples, david.mapper, rs, nrep)
+subsets <- validate(js.dist, samples, david.mapper, rs, nrep)
 fsubject.bi <- vertex.bimodality("f.subject")
 bi.0 <- fsubject.bi(mpr$graph)
 bis <- batch.bi(subsets, fsubject.bi, "r")
@@ -405,17 +406,18 @@ pdavid.bi
 # plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
 #' Find basins of attraction:
-graf <- graf %>%
+mpr$graph <- mpr$graph %>%
   activate(nodes) %>%
   mutate(scaled.knn = mean.knn / size)
-graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE,
+mpr$graph <- assign.basins(mpr$graph, "scaled.knn", ignore.singletons = TRUE,
                       giant.only = FALSE) %>%
   activate(nodes) %>%
   mutate(basin = mapply(function(b, x) if (x) NA else b,
                         b = basin, x = in.singleton)) %>%
   mutate(is.extremum = mapply(function(b, x) if (x) NA else b,
                         b = is.extremum, x = in.singleton))
-write.graph(graf, v2p[, .(point.name, vertex)], paste0(output.dir, "david/"))
+write.graph(mpr$graph, mpr$map[, .(point.name, vertex)],
+            paste0(output.dir, "david/"))
 
 
 # combined validation plot -----------------------------------------
@@ -488,12 +490,12 @@ plot.depth.linear <- plot.mapper.linear("mean.depth", palette = "Blues",
 pl <- batch.plot(subsets, plot.depth.linear)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 
-graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
-graf <- graf %>%
+mpr$graph <- assign.basins(mpr$graph, "scaled.knn", ignore.singletons = TRUE)
+mpr$graph <- mpr$graph %>%
   mutate(membership = components(.)$membership) %>%
-  mutate(in.singleton = in.singleton(v2p$point.name, v2p$vertex, membership))
-graf <- mutate(graf, basin = nullify(in.singleton, basin))
-write.graph(graf, v2p[, .(point.name, vertex)],
+  mutate(in.singleton = in.singleton(mpr$map$point.name, mpr$map$vertex, membership))
+mpr$graph <- mutate(mpr$graph, basin = nullify(in.singleton, basin))
+write.graph(mpr$graph, mpr$map[, .(point.name, vertex)],
             paste0(output.dir, "prochlorococcus/"))
 
 

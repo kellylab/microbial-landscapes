@@ -15,8 +15,25 @@ for (script in list.files(utils.dir, full.names = TRUE)) source(script)
 source(loader.script)
 david.mapper <- read.mapper.graph(mapper.dir)
 david.v2p <- merge.mpr.samples(david.mapper, david.samples)
+plotter <- function(v) {
+  plot.mapper.graph(david.mapper$graph,
+                    node = geom_node_point(aes_(size = ~size, fill = v),
+                                           shape = 21),
+                    seed = 13,
+                    exclude.singletons = TRUE) +
+    guides(size = FALSE) +
+    scale_size_area(max_size = 4)
+}
 
 # frac subject ------------------------------------------------------------
+
+plotter(~f.subject) +
+  scale_fill_distiller(palette = "Spectral", breaks = c(0, 0.5, 1),
+                       labels = c("all B", "", "all A"))
+fsubject <- last_plot()
+
+
+# events ------------------------------------------------------------------
 
 
 set.seed(13)
@@ -24,88 +41,42 @@ lo <- david.mapper$graph %>% # mapper graph with no outlier
   activate(nodes) %>%
   filter(!in.singleton) %>%
   create_layout("fr", niter = 1000)
-ggraph(lo) +
-  geom_edge_link0() +
-  geom_node_point(aes(fill = f.subject, size = size),
-                  data = function(df) filter(df, !in.singleton), shape = 21) +
-  labs(fill = "subject") +
-  scale_fill_distiller(palette = "Spectral", breaks = c(0, 0.5, 1),
-                       labels = c("all B", "", "all A")) +
-  scale_size_area(max_size = 4) +
-  guides(size = FALSE) +
-  theme_graph(base_family = "Helvetica") +
-  coord_equal()
-fsubject <- last_plot()
-
-
-# events ------------------------------------------------------------------
-
-
-setkey(david.v2p, subject, event)
 title.size <- 10
 base.size <- 8
-theme_set(theme_graph(base_family = "Helvetica", title_size = title.size,
-                      base_size = base.size) +  theme(legend.position = "none"))
-plot_grid(
+plt.event <- function(subj, ev, color, label) {
+  setkey(david.v2p, subject, event)
+  # browser()
+  vs <- david.v2p[.(subj, ev)]$vertex
   ggraph(lo) +
     geom_edge_link0() +
     geom_node_point(aes(size = size), color = "grey") +
     geom_node_point(aes(size = size),
-                    data = function(df) {
-                      filter(df, vertex %in% david.v2p[.("A", "US (pre)")]$vertex)
-                    },
-                    fill = "blue", shape = 21) +
-    labs(title = "A, pre-travel") +
+                    data = function(df) filter(df, vertex %in% vs),
+                    fill = color, shape = 21) +
+    labs(title = label) +
+    theme_graph(base_family = "Helvetica", title_size = title.size,
+                      base_size = base.size) +
+    theme(legend.position = "none") +
     scale_size_area(max_size = 2) +
-    coord_equal(),
-  ggraph(lo) +
-    geom_edge_link0() +
-    geom_node_point(aes(size = size), color = "grey") +
-    geom_node_point(aes(size = size),
-                    data = function(df) {
-                      filter(df, vertex %in% david.v2p[.("A", "US (post)")]$vertex)
-                    },
-                    fill = "purple", shape = 21) +
-    scale_size_area(max_size = 2) +
-    labs(title = "A, post-travel") +
-    coord_equal(),
-  ggraph(lo) +
-    geom_edge_link0() +
-    geom_node_point(aes(size = size), color = "grey") +
-    geom_node_point(aes(size = size),
-                    data = function(df) {
-                      filter(df, vertex %in% david.v2p[.("B", "pre-Salmonella")]$vertex)
-                    },
-                    fill = "red", shape = 21) +
-    scale_size_area(max_size = 2) +
-    labs(title = "B, pre-Salmonella") +
-    coord_equal(),
-  ggraph(lo) +
-    geom_edge_link0() +
-    geom_node_point(aes(size = size), color = "grey") +
-    geom_node_point(aes(size = size),
-                    data = function(df) {
-                      filter(df, vertex %in% david.v2p[.("B", "post-Salmonella")]$vertex)
-                    },
-                    fill = "orange", shape = 21) +
-    scale_size_area(max_size = 2) +
-    labs(title = "B, post-Salmonella") +
     coord_equal()
-)
+}
+plot_grid(plotlist = mapply(plt.event,
+                            subj = c("A", "A", "B", "B"),
+                            ev = c("US (pre)", "US (post)",
+                                      "pre-Salmonella", "post-Salmonella"
+                                      ),
+                            color = c("blue", "purple", "red", "orange"),
+                            label = c("A, pre-travel", "A, post-travel",
+                                      "B, pre-Salmonella", "B, post-Salmonella"
+                                      ),
+                            SIMPLIFY = FALSE)
+          )
 events <- last_plot()
 
 
 # basins ------------------------------------------------------------------
 
-
-ggraph(lo) +
-  geom_edge_link0() +
-  geom_node_point(aes(fill = as.factor(basin), size = size),
-                  data = function(df) filter(df, !in.singleton), shape = 21) +
-  labs(fill = "basin") +
-  guides(size = FALSE) +
-  theme_graph(base_family = "Helvetica") +
-  coord_equal()
+plotter(~as.factor(basin)) + labs(fill = "basin")
 basins <- last_plot()
 
 
@@ -153,22 +124,6 @@ david.persistence <- david.v2p %>%
   .[, c("subject", "event", "healthy") := tstrsplit(id, "\\.",
                                                     type.convert = TRUE)] %>%
   .[, id := NULL]
-# setkey(david.persistence, subject)
-# pl <- lapply(split(david.persistence[!is.na(basin)], by = "subject"),
-#           function(dt) {
-#             dt %>%
-#               ggplot(aes(x = delta.t, y = f, color = basin)) +
-#               geom_point(data = function(df) filter(df, N <= 10),
-#                          alpha = 0.5) +
-#               geom_smooth(aes(color = basin, fill = basin),
-#                           data = function(df) filter(df, N > 10)) +
-#               scale_color_hue(drop = FALSE) +
-#               scale_fill_hue(drop = FALSE) +
-#               coord_cartesian(ylim = c(0, 1)) +
-#               scale_y_continuous(breaks = c(0, 0.5, 1)) +
-#               labs(x = "interval (days)", y = "correlation") +
-#               facet_wrap(~ event, ncol = 1)
-#             })
 theme_set(theme_cowplot() + theme(legend.position = "none",
                                   axis.text = element_text(size = title.size),
                                   axis.title = element_text(size = title.size),
@@ -195,28 +150,30 @@ correlation <- last_plot()
 
 # compiled ----------------------------------------------------------------
 
-plot_grid(fsubject, events, ncol = 2, labels = "AUTO")
+plot_grid(fsubject, events,
+          basins, plot_grid(distribs, correlation, nrow = 2),
+          ncol = 2, labels = "AUTO")
 save_plot("../../figures/tda/paper/fig3.pdf", last_plot(), ncol = 2,
-          base_width = 4)
-plot_grid(basins + guides(fill = guide_legend(nrow = 10)),
-          plot_grid(distribs +
-                      theme(legend.position = "none",
-                            axis.text = element_text(size = base.size),
-                            axis.title = element_text(size = title.size)),
-                    correlation +
-                      theme(axis.text = element_text(size = base.size),
-                            strip.text.y = element_text(size = title.size)),
-                    ncol = 2, labels = c("B", "C")),
-          # series + theme_cowplot(font_size = title.size) +
-          #   guides(fill = guide_legend(direction = "horizontal")) +
-          #   theme(legend.position = "bottom", axis.text.y = element_blank(),
-          #         axis.ticks = element_blank()),
-          # labels = c("A", "", "D"),
-          # rel_heights = c(2, 2, 1)
-          labels = c("A", ""),
-          ncol = 1,
-          rel_heights = c(1.5, 1)
-          )
-save_plot("../../figures/tda/paper/fig4.pdf", last_plot(), nrow = 2, base_width = 8)
-theme_set(theme_cowplot())
-save_plot("../../figures/tda/paper/fig5.pdf", series, base_width = 8)
+          base_width = 4, base_height = 10)
+# plot_grid(basins + guides(fill = guide_legend(nrow = 10)),
+#           plot_grid(distribs +
+#                       theme(legend.position = "none",
+#                             axis.text = element_text(size = base.size),
+#                             axis.title = element_text(size = title.size)),
+#                     correlation +
+#                       theme(axis.text = element_text(size = base.size),
+#                             strip.text.y = element_text(size = title.size)),
+#                     ncol = 2, labels = c("B", "C")),
+#           # series + theme_cowplot(font_size = title.size) +
+#           #   guides(fill = guide_legend(direction = "horizontal")) +
+#           #   theme(legend.position = "bottom", axis.text.y = element_blank(),
+#           #         axis.ticks = element_blank()),
+#           # labels = c("A", "", "D"),
+#           # rel_heights = c(2, 2, 1)
+#           labels = c("A", ""),
+#           ncol = 1,
+#           rel_heights = c(1.5, 1)
+#           )
+# save_plot("../../figures/tda/paper/fig4.pdf", last_plot(), nrow = 2, base_width = 8)
+# theme_set(theme_cowplot())
+# save_plot("../../figures/tda/paper/fig5.pdf", series, base_width = 8)
