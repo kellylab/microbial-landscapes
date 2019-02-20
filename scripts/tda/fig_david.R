@@ -29,7 +29,8 @@ plotter <- function(v) {
 
 plotter(~f.subject) +
   scale_fill_distiller(palette = "Spectral", breaks = c(0, 0.5, 1),
-                       labels = c("all B", "", "all A"))
+                       labels = c("all B", "", "all A")) +
+  labs(fill = "subject")
 fsubject <- last_plot()
 
 
@@ -56,7 +57,7 @@ plt.event <- function(subj, ev, color, label) {
     labs(title = label) +
     theme_graph(base_family = "Helvetica", title_size = title.size,
                       base_size = base.size) +
-    theme(legend.position = "none") +
+    theme(legend.position = "none", plot.margin = margin(1, 1, 1, 1)) +
     scale_size_area(max_size = 2) +
     coord_equal()
 }
@@ -152,9 +153,9 @@ correlation <- last_plot()
 
 plot_grid(fsubject, events,
           basins, plot_grid(distribs, correlation, nrow = 2),
-          ncol = 2, labels = "AUTO")
+          ncol = 2, rel_heights = c(2, 3), labels = "AUTO")
 save_plot("../../figures/tda/paper/fig3.pdf", last_plot(), ncol = 2,
-          base_width = 4, base_height = 10)
+          base_width = 4, base_height = 8)
 # plot_grid(basins + guides(fill = guide_legend(nrow = 10)),
 #           plot_grid(distribs +
 #                       theme(legend.position = "none",

@@ -24,7 +24,8 @@ plotter <- function(v) {
                                            shape = 21),
                     seed = 0,
                     exclude.singletons = TRUE) +
-    guides(size = FALSE)
+    guides(size = FALSE) +
+    coord_equal()
 }
 # set.seed(0)
 # lo <- prochlorococcus.mapper$graph %>%
@@ -34,48 +35,25 @@ plotter <- function(v) {
 
 # temp ----------------------------------------------------------
 
-
-# theme_set(theme_graph(base_family = "Helvetica", base_size = 10))
-#' Composition varies continuously with temperature
 plotter(~mean.temp) +
   scale_fill_distiller(palette = "Spectral") +
   labs(fill = "C")
-
-ggraph(lo) +
-  geom_edge_link0() +
-  geom_node_point(aes(size = size, fill = mean.temp), shape = 21) +
-  scale_fill_distiller(palette = "Spectral") +
-  theme_graph(base_family = "Helvetica", base_size = 10) +
-  labs(fill = "C") +
-  coord_equal() +
-  guides(size = FALSE)
 temp <- last_plot()
 
 # depth -------------------------------------------------------------------
 
-
-
-#' Composition varies continuously with depth
-ggraph(lo) +
-  geom_edge_link0() +
-  geom_node_point(aes(size = size, fill = mean.depth), shape = 21) +
+plotter(~mean.depth) +
   scale_fill_distiller(palette = "Blues", direction = 1) +
   theme_graph(base_family = "Helvetica", base_size = 10) +
   labs(fill = "m") +
-  coord_equal() +
   guides(size = FALSE, fill = guide_colorbar(reverse = TRUE))
 depth <- last_plot()
 
 
 # basins ------------------------------------------------------------------
 
-
-ggraph(lo) +
-  geom_edge_link0() +
-  geom_node_point(aes(size = size, fill = basin), shape = 21) +
-  theme_graph(base_family = "Helvetica", base_size = 10) +
-  coord_equal() +
-  guides(size = FALSE, fill = guide_legend(ncol = 2))
+plotter(~as.factor(basin))  +
+  labs(fill = "basin")
 basins <- last_plot()
 
 
@@ -83,7 +61,12 @@ basins <- last_plot()
 
 p2basin <- prochlorococcus.v2p[, .N,
                                by = .(site, depth, month, day, cal.month, basin)]
-theme_set(theme_cowplot())
+theme_set(theme_cowplot() +
+            theme(strip.background = element_rect(size = 0.1),
+                  strip.text.x = element_text(size = 10, margin = margin(2, 2, 2, 2)),
+                  axis.title = element_text(size = 10),
+                  axis.text = element_text(size = 10))
+          )
 plot.series <- function(dt) {
   jans <- dt[cal.month == 1, unique(month)]
   ggplot(dt, aes(x = month, y = basin)) +
@@ -141,31 +124,37 @@ pl <- prochlorococcus.persistence[!is.na(basin)] %>%
   split(by = "site") %>%
   lapply(function(df) {
     ggplot(df, aes(x = delta.t, y = f, color = basin)) +
+      geom_jitter(aes(color = basin), size = 0.1, alpha = 0.1) +
       stat_smooth(aes(fill = basin), data = function(dt) filter(dt, to.smooth)) +
       stat_summary(data = function(dt) filter(dt, !to.smooth),
                    geom = "point", fun.y = mean, size = 0.1) +
-      facet_wrap(~ depth) +
+      facet_wrap(~ depth, nrow = 4) +
       coord_cartesian(ylim = c(0, 1)) +
+      scale_y_continuous(breaks = c(0, 0.5, 1)) +
       scale_color_hue(drop = FALSE) +
       scale_fill_hue(drop = FALSE) +
+      theme(legend.position = "none",
+            strip.text.x = element_text(margin = margin(2, 2, 2, 2))) +
       labs(x = "interval (months)", y = "correlation")
   })
 pl <- mapply(function(p, nom) p + labs(title = toupper(nom)),
              p = pl, nom = names(pl), SIMPLIFY = FALSE)
-plot_grid(plot_grid(pl[[1]] + theme(legend.position = "none"),
-                    pl[[2]] + theme(legend.position = "none"),
-                    ncol = 2))
+plot_grid(plotlist = pl, ncol = 2)
 correlation <- last_plot()
 
 # compiled ----------------------------------------------------------------
 
-plot_grid(plot_grid(temp, depth, nrow = 1, labels = "AUTO"),
-          basins, labels = c("", "C"),
-          ncol = 1)
-save_plot("../../figures/tda/paper/fig6.pdf", last_plot(),
-          ncol = 1,
-          base_width = 8, base_height = 8)
-plot_grid(series, distribs, correlation,
-          ncol = 1, labels = "AUTO")
-save_plot("../../figures/tda/paper/fig7.pdf", last_plot(), ncol = 1,
-          base_width = 8, base_height = 12)
+# plot_grid(plot_grid(temp, depth, nrow = 1, labels = "AUTO"),
+#           basins, labels = c("", "C"),
+#           ncol = 1)
+# save_plot("../../figures/tda/paper/fig6.pdf", last_plot(),
+#           ncol = 1,
+#           base_width = 8, base_height = 8)
+# plot_grid(series, distribs, correlation,
+#           ncol = 1, labels = "AUTO")
+
+plot_grid(plot_grid(depth, basins, ncol = 2, labels = c("A", "B")),
+          plot_grid(series, correlation, nrow = 2, align = "v", labels = c("C", "D")),
+          ncol = 1, rel_heights = c(2, 3))
+save_plot("../../figures/tda/paper/fig4.pdf", last_plot(), ncol = 2,
+          base_width = 4, base_height = 8)

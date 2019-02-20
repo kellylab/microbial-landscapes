@@ -10,7 +10,7 @@ library(cowplot)
 library(BimodalIndex)
 
 # validation parameters
-nrep <- 100             # number of replicates
+nrep <- 1             # number of replicates
 rs <- c(0.9, 0.5, 0.1) # downsampling ratios
 rs <- seq(from = 0.1, to = 0.9, by = 0.1)
 
@@ -100,43 +100,6 @@ validate <- function(dist, dt, fn, rs, nrep) {
                        ftr = list(rk.mds[,1], rk.mds[,2])))
     }, r, dist, dt, fn)
   }, nrep, dist, dt, fn)
-}
-
-#' Basic FR layout and plot of Mapper graph
-#'
-#' @param graf
-#' @param edge
-#' @param node
-#' @param exclude.singletons
-#' @param seed
-#'
-#' @return ggplot object
-#' @export
-#'
-#' @examples
-plot.mapper.graph <- function(graf,
-                              edge = geom_edge_link0(),
-                              node = geom_node_point(),
-                              exclude.singletons = FALSE,
-                              seed = NULL,
-                              layout = "fr",
-                              ...) {
-  set.seed(seed)
-  if (exclude.singletons) {
-    graf <- graf %>%
-      activate(nodes) %>%
-      filter(!in.singleton)
-  }
-  if (layout == "fr") {
-    g <- ggraph(graf, layout, niter = 1000)
-  } else {
-    g <- ggraph(graf, layout, ...)
-  }
-  g +
-    edge +
-    node +
-    theme_graph(base_family = "Helvetica") +
-    theme(aspect.ratio = 1)
 }
 
 plot.mapper.linear <- function(vatt, palette = "Spectral", direction = -1) {
@@ -311,7 +274,7 @@ bi.0 <- fstate.bi(mpr$graph)
 bis <- batch.bi(subsets, fstate.bi, "r")
 bis[, r := rs[r]]
 pcholera.bi <- plot.bi.validation(bis, bi.0)
-pbcholera.bi
+pcholera.bi
 
 # plot.fstate.linear <- plot.mapper.linear("f.state")
 # pl <- batch.plot(subsets, plot.fstate.linear)
@@ -461,6 +424,7 @@ ni <- c(20, 20)
 proc.vertices <- function(map) {
   map[, .(size = .N,
           f.bats = sum(site == "bats") / .N,
+          mean.knn = mean(knn),
           mean.depth = mean(depth, na.rm = TRUE),
           mean.temp = mean(temp, na.rm = TRUE),
           mean.sal = mean(sal, na.rm = TRUE),
@@ -471,7 +435,10 @@ proc.vertices <- function(map) {
 proc.mapper <- mapper2.call(ni, po, proc.vertices)
 # nb <- 10
 ftr <- list(rk.mds[, 1], rk.mds[, 2])
-mpr <- proc.mapper(dist.mat, prochlorococcus.samples, ftr)
+mpr <- proc.mapper(dist.mat, samples, ftr)
+mpr$graph <- mpr$graph %>%
+  activate(nodes) %>%
+  mutate(scaled.knn = mean.knn / size)
 
 plot.depth <- function(graf) {
   plot.mapper.graph(graf,
@@ -484,7 +451,7 @@ plot.depth <- function(graf) {
 plot.depth(mpr$graph)
 
 # validate
-subsets <- validate(dist.mat, prochlorococcus.samples, proc.mapper, rs, nrep)
+subsets <- validate(dist.mat, samples, proc.mapper, rs, nrep)
 plot.depth.linear <- plot.mapper.linear("mean.depth", palette = "Blues",
                                         direction = 1)
 pl <- batch.plot(subsets, plot.depth.linear)
