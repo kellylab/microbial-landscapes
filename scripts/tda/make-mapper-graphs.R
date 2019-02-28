@@ -7,12 +7,12 @@ library(ggraph)
 library(igraph)
 library(tidygraph)
 library(cowplot)
-library(BimodalIndex)
+#library(BimodalIndex)
 
 # validation parameters
-nrep <- 1             # number of replicates
+nrep <- 10             # number of replicates
 rs <- c(0.9, 0.5, 0.1) # downsampling ratios
-rs <- seq(from = 0.1, to = 0.9, by = 0.1)
+# rs <- seq(from = 0.1, to = 0.9, by = 0.1)
 
 jsd.dir <- "jsds/"
 figs.dir <- "../../figures/tda/"
@@ -106,11 +106,12 @@ plot.mapper.linear <- function(vatt, palette = "Spectral", direction = -1) {
   function(graf) {
     plot.mapper.graph(graf,
                       node = geom_node_point(aes_string(color = vatt),
-                                             size = 0.5),
+                                             size = 0.2),
                       edge = geom_edge_arc0(width = 0.1),
                       layout = "linear",
                       sort.by = vatt) +
-      scale_color_distiller(palette = palette, direction = direction)
+      scale_color_distiller(palette = palette, direction = direction) +
+      theme(plot.margin = margin())
   }
 }
 
@@ -196,6 +197,10 @@ write.graph <- function(tbl_graph, v2p, directory) {
   fwrite(v2p, paste0(directory, "/vertices-to-points.txt"), sep = "\t")
 }
 
+write.validation.plot <- function(fn, plt) {
+  save_plot(fn, plt, ncol = 1, base_width = 8, base_height = 6)
+}
+
 # cholera -----------------------------------------------------------------
 
 source("../r/load_cholera_data.R")
@@ -269,26 +274,29 @@ plot.fstate(mpr$graph, seed = 1)
 
 # validate
 subsets <- validate(js.dist, gordon.samples, cholera.mapper, rs, nrep)
-fstate.bi <- vertex.bimodality("f.state")
-bi.0 <- fstate.bi(mpr$graph)
-bis <- batch.bi(subsets, fstate.bi, "r")
-bis[, r := rs[r]]
-pcholera.bi <- plot.bi.validation(bis, bi.0)
-pcholera.bi
+# fstate.bi <- vertex.bimodality("f.state")
+# bi.0 <- fstate.bi(mpr$graph)
+# bis <- batch.bi(subsets, fstate.bi, "r")
+# bis[, r := rs[r]]
+# pcholera.bi <- plot.bi.validation(bis, bi.0)
+# pcholera.bi
 
-# plot.fstate.linear <- plot.mapper.linear("f.state")
-# pl <- batch.plot(subsets, plot.fstate.linear)
-# plot_grid(plotlist = pl, ncol = 1, labels = rs)
+plot.fstate.linear <- plot.mapper.linear("f.state")
+pl <- batch.plot(subsets, plot.fstate.linear)
+plot_grid(plotlist = pl, ncol = 1, labels = rs)
+pl.cholera.validate <- last_plot()
+write.validation.plot('../../figures/tda/paper/sup_fig1.pdf', last_plot())
 
 # assign minima and basins
-graf <- graf %>% mutate(scaled.knn = mean.knn / size)
-graf <- assign.basins(graf, "scaled.knn", ignore.singletons = TRUE)
-graf <- graf %>%
+mpr$graph <- mpr$graph %>% mutate(scaled.knn = mean.knn / size)
+mpr$graph <- assign.basins(mpr$graph, "scaled.knn", ignore.singletons = TRUE)
+mpr$graph <- mpr$graph %>%
   mutate(basin = mapply(function(b, x) if (x) NA else b,
                         b = basin, x = in.singleton)) %>%
   mutate(is.extremum = mapply(function(b, x) if (x) NA else b,
                         b = is.extremum, x = in.singleton))
-write.graph(graf, v2p[, .(point.name, vertex)], paste0(output.dir, "cholera/"))
+write.graph(mpr$graph, mpr$map[, .(point.name, vertex)], 
+            paste0(output.dir, "cholera/"))
 
 
 # david -------------------------------------------------------------------
@@ -357,16 +365,18 @@ plot.fsubject <- function(graf) {
 
 # validate
 subsets <- validate(js.dist, samples, david.mapper, rs, nrep)
-fsubject.bi <- vertex.bimodality("f.subject")
-bi.0 <- fsubject.bi(mpr$graph)
-bis <- batch.bi(subsets, fsubject.bi, "r")
-bis[, r := rs[r]]
-pdavid.bi <- plot.bi.validation(bis, bi.0)
-pdavid.bi
+# fsubject.bi <- vertex.bimodality("f.subject")
+# bi.0 <- fsubject.bi(mpr$graph)
+# bis <- batch.bi(subsets, fsubject.bi, "r")
+# bis[, r := rs[r]]
+# pdavid.bi <- plot.bi.validation(bis, bi.0)
+# pdavid.bi
 
-# plot.fsubject.linear <- plot.mapper.linear("f.subject")
-# pl <- batch.plot(subsets, plot.fsubject.linear)
-# plot_grid(plotlist = pl, ncol = 1, labels = rs)
+plot.fsubject.linear <- plot.mapper.linear("f.subject")
+pl <- batch.plot(subsets, plot.fsubject.linear)
+plot_grid(plotlist = pl, ncol = 1, labels = rs)
+pl.david.validate <- last_plot()
+write.validation.plot('../../figures/tda/paper/sup_fig2.pdf', last_plot())
 
 #' Find basins of attraction:
 mpr$graph <- mpr$graph %>%
@@ -384,8 +394,8 @@ write.graph(mpr$graph, mpr$map[, .(point.name, vertex)],
 
 
 # combined validation plot -----------------------------------------
-plot_grid(pcholera.bi + labs(title = "cholera"),
-          pdavid.bi + labs(title = "2 healthy"), nrow = 2, align = "v")
+# plot_grid(pcholera.bi + labs(title = "cholera"),
+#           pdavid.bi + labs(title = "2 healthy"), nrow = 2, align = "v")
 
 
 
@@ -456,6 +466,8 @@ plot.depth.linear <- plot.mapper.linear("mean.depth", palette = "Blues",
                                         direction = 1)
 pl <- batch.plot(subsets, plot.depth.linear)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
+pl.proc.validate <- last_plot()
+write.validation.plot('../../figures/tda/paper/sup_fig3.pdf', last_plot())
 
 mpr$graph <- assign.basins(mpr$graph, "scaled.knn", ignore.singletons = TRUE)
 mpr$graph <- mpr$graph %>%
