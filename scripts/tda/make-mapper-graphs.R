@@ -102,14 +102,19 @@ validate <- function(dist, dt, fn, rs, nrep) {
   }, nrep, dist, dt, fn)
 }
 
-plot.mapper.linear <- function(vatt, palette = "Spectral", direction = -1) {
+plot.mapper.linear <- function(vatt, circular = TRUE,
+                               palette = "Spectral", direction = -1) {
+  if (circular) {
+    ej <- geom_edge_density()
+  } else {
+    ej <- geom_edge_arc0(width = 0.1)
+  }
   function(graf) {
     plot.mapper.graph(graf,
                       node = geom_node_point(aes_string(color = vatt),
                                              size = 0.2),
-                      edge = geom_edge_arc0(width = 0.1),
-                      layout = "linear",
-                      sort.by = vatt) +
+                      edge = ej,
+                      layout = "linear", circular = circular, sort.by = vatt) +
       scale_color_distiller(palette = palette, direction = direction) +
       theme(plot.margin = margin())
   }
