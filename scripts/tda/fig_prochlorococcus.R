@@ -157,4 +157,4 @@ plot_grid(plot_grid(depth, basins, ncol = 2, labels = c("A", "B")),
           plot_grid(series, correlation, nrow = 2, align = "v", labels = c("C", "D")),
           ncol = 1, rel_heights = c(2, 3))
 save_plot("../../figures/tda/paper/fig4.pdf", last_plot(), ncol = 2,
-          base_width = 4, base_height = 8)
+          base_width = 4, base_height = 10)

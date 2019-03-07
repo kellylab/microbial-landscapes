@@ -105,7 +105,7 @@ validate <- function(dist, dt, fn, rs, nrep) {
 plot.mapper.linear <- function(vatt, circular = TRUE,
                                palette = "Spectral", direction = -1) {
   if (circular) {
-    ej <- geom_edge_density()
+    ej <- geom_edge_density(fill = "black")
   } else {
     ej <- geom_edge_arc0(width = 0.1)
   }
@@ -115,8 +115,7 @@ plot.mapper.linear <- function(vatt, circular = TRUE,
                                              size = 0.2),
                       edge = ej,
                       layout = "linear", circular = circular, sort.by = vatt) +
-      scale_color_distiller(palette = palette, direction = direction) +
-      theme(plot.margin = margin())
+      scale_color_distiller(palette = palette, direction = direction)
   }
 }
 
@@ -180,7 +179,7 @@ batch.plot <- function(subsets, fn) {
     plots <- lapply(l, function(mpr) {
       do.call(fn, list(graf = mpr$graph)) +
         theme(legend.position = "none",
-              plot.margin = unit(c(0, 0, 0, 0), "points"))
+              plot.margin = unit(c(10, 10, 10, 10), "points"))
     })
     plot_grid(plotlist = plots, nrow = 2)
   })
@@ -300,7 +299,7 @@ mpr$graph <- mpr$graph %>%
                         b = basin, x = in.singleton)) %>%
   mutate(is.extremum = mapply(function(b, x) if (x) NA else b,
                         b = is.extremum, x = in.singleton))
-write.graph(mpr$graph, mpr$map[, .(point.name, vertex)], 
+write.graph(mpr$graph, mpr$map[, .(point.name, vertex)],
             paste0(output.dir, "cholera/"))
 
 
