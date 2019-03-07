@@ -39,6 +39,8 @@ plotter(~mean.temp) +
   scale_fill_distiller(palette = "Spectral") +
   labs(fill = "C")
 temp <- last_plot()
+save_plot("../../figures/tda/paper/sup_fig4.pdf", temp, ncol = 1, nrow = 1,
+          base_width = 8)
 
 # depth -------------------------------------------------------------------
 
