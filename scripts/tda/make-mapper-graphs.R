@@ -102,21 +102,28 @@ validate <- function(dist, dt, fn, rs, nrep) {
   }, nrep, dist, dt, fn)
 }
 
-plot.mapper.linear <- function(vatt, circular = TRUE,
-                               palette = "Spectral", direction = -1) {
+plot.mapper.linear <- function(vatt, 
+                               circular = TRUE#,
+                               # palette = "Spectral", 
+                               # direction = -1
+                               ) {
   if (circular) {
     ej <- geom_edge_density(fill = "black")
   } else {
     ej <- geom_edge_arc0(width = 0.1)
   }
-  function(graf) {
+  f <- function(graf) {
     plot.mapper.graph(graf,
                       node = geom_node_point(aes_string(color = vatt),
                                              size = 0.2),
                       edge = ej,
-                      layout = "linear", circular = circular, sort.by = vatt) +
-      scale_color_distiller(palette = palette, direction = direction)
+                      layout = "linear", circular = circular, sort.by = vatt) #+
+      # scale_color_distiller(palette = palette, direction = direction) 
   }
+  # if (!is.null(modifier)) {
+  #   f <- modifier(f)
+  # }
+  f
 }
 
 #' Return a function that calculates the bimodality index of some vertex attribute
@@ -177,11 +184,17 @@ plot.bi.validation <- function(bis, bi.0) {
 batch.plot <- function(subsets, fn) {
   pl <- lapply(subsets, function(l) {
     plots <- lapply(l, function(mpr) {
-      do.call(fn, list(graf = mpr$graph)) +
-        theme(legend.position = "none",
-              plot.margin = unit(c(10, 10, 10, 10), "points"))
+      fn(mpr$graph) 
     })
-    plot_grid(plotlist = plots, nrow = 2)
+    # get legend
+    legend <- get_legend(plots[[1]])
+    # delete legends and "subplotify"
+    plots <- lapply(plots, function(p) {
+      p +  theme(legend.position = "None", 
+                 plot.margin = unit(c(10, 10, 10, 10), "points"))
+    })
+    viz <- plot_grid(plotlist = plots, nrow = 2)
+    plot_grid(viz, legend, ncol = 2, rel_widths = c(8, 1))
   })
 }
 
@@ -270,8 +283,7 @@ mpr <- cholera.mapper(js.dist, gordon.samples, ftr)
 plot.fstate <- function(graf, ...) {
   plot.mapper.graph(graf,
                     node = geom_node_point(aes(color = f.state, size = size)),
-                    ...) +
-    scale_color_distiller(palette = "Spectral")
+                    ...) 
 }
 
 plot.fstate(mpr$graph, seed = 1)
@@ -285,8 +297,19 @@ subsets <- validate(js.dist, gordon.samples, cholera.mapper, rs, nrep)
 # pcholera.bi <- plot.bi.validation(bis, bi.0)
 # pcholera.bi
 
+# mod <- function(g) {
+#   g + 
+#     labs(color = "fraction\ndiarrhea") + 
+#   scale_color_distiller(palette = "Spectral", values = c(0, 0.5, 1))
+# }
 plot.fstate.linear <- plot.mapper.linear("f.state")
-pl <- batch.plot(subsets, plot.fstate.linear)
+p2 <- function(g) {
+  plot.fstate.linear(g) +
+    labs(color = "fraction\ndiarrhea") +  
+    scale_color_distiller(palette = "Spectral", values = c(0, 0.5, 1))
+    
+}
+pl <- batch.plot(subsets, p2)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 pl.cholera.validate <- last_plot()
 write.validation.plot('../../figures/tda/paper/sup_fig1.pdf', last_plot())
@@ -363,8 +386,7 @@ mpr <- david.mapper(js.dist, samples, ftr)
 
 plot.fsubject <- function(graf) {
   plot.mapper.graph(graf,
-                    node = geom_node_point(aes(color = f.subject, size = size))) +
-    scale_color_distiller(palette = "Spectral")
+                    node = geom_node_point(aes(color = f.subject, size = size))) 
 }
 
 # validate
@@ -377,7 +399,13 @@ subsets <- validate(js.dist, samples, david.mapper, rs, nrep)
 # pdavid.bi
 
 plot.fsubject.linear <- plot.mapper.linear("f.subject")
-pl <- batch.plot(subsets, plot.fsubject.linear)
+p2 <- function(g) {
+  plot.fsubject.linear(g) +
+    labs(color = "fraction\nsubject A") +  
+    scale_color_distiller(palette = "Spectral", values = c(0, 0.5, 1))
+    
+}
+pl <- batch.plot(subsets, p2)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 pl.david.validate <- last_plot()
 write.validation.plot('../../figures/tda/paper/sup_fig2.pdf', last_plot())
@@ -458,17 +486,22 @@ plot.depth <- function(graf) {
   plot.mapper.graph(graf,
                     node = geom_node_point(aes(color = mean.depth, size = size)),
                     exclude.singletons = TRUE,
-                    seed = 0) +
-    scale_color_distiller(palette = "Blues", direction = 1)
+                    seed = 0) 
 }
 
 plot.depth(mpr$graph)
 
 # validate
 subsets <- validate(dist.mat, samples, proc.mapper, rs, nrep)
-plot.depth.linear <- plot.mapper.linear("mean.depth", palette = "Blues",
-                                        direction = 1)
-pl <- batch.plot(subsets, plot.depth.linear)
+plot.depth.linear <- plot.mapper.linear("mean.depth")
+p2 <- function(g) {
+  plot.depth.linear(g) +
+    labs(color = "m") +  
+    scale_color_distiller(palette = "Blues", direction = 1, 
+                          values = c(1, 50, 100, 150, 200)) +
+    guides(color = guide_colorbar(reverse = TRUE))
+}
+pl <- batch.plot(subsets, p2)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 pl.proc.validate <- last_plot()
 write.validation.plot('../../figures/tda/paper/sup_fig3.pdf', last_plot())
