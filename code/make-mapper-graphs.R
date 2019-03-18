@@ -7,19 +7,20 @@ library(ggraph)
 library(igraph)
 library(tidygraph)
 library(cowplot)
-#library(BimodalIndex)
 
 # validation parameters
 nrep <- 10             # number of replicates
 rs <- c(0.9, 0.5, 0.1) # downsampling ratios
-# rs <- seq(from = 0.1, to = 0.9, by = 0.1)
 
 jsd.dir <- "jsds/"
-figs.dir <- "../../figures/tda/"
-output.dir <- "../../output/mapper/"
-if (!dir.exists(output.dir)) dir.create(output.dir, recursive = TRUE)
-scripts.dir <- "../r/"
-for (script in list.files("utils/", full.names = TRUE)) source(script)
+figs.dir <- "../figures/"
+output.dir <- "mapper-output/"
+for (d in c(figs.dir, output.dir)) {
+  if (!dir.exists(d)) dir.create(d, recursive = TRUE)
+}
+data.dir <- "../data/"
+utils.dir <- "utils/"
+for (script in list.files(utils.dir, full.names = TRUE)) source(script)
 
 #' Construct function to call Mapper2D and map vertices to original data points
 #'
@@ -102,74 +103,28 @@ validate <- function(dist, dt, fn, rs, nrep) {
   }, nrep, dist, dt, fn)
 }
 
-plot.mapper.linear <- function(vatt, 
-                               circular = TRUE#,
-                               # palette = "Spectral", 
-                               # direction = -1
-                               ) {
+#' Generate a function to plot a Mapper graph as a line or circle
+#'
+#' @param vatt      The vertex attribute by which to color the vertices
+#' @param circular  Whether to plot in a circle
+#'
+#' @return a function
+#' @export
+#'
+#' @examples
+plot.mapper.linear <- function(vatt, circular = TRUE) {
   if (circular) {
     ej <- geom_edge_density(fill = "black")
   } else {
     ej <- geom_edge_arc0(width = 0.1)
   }
-  f <- function(graf) {
+  function(graf) {
     plot.mapper.graph(graf,
                       node = geom_node_point(aes_string(color = vatt),
                                              size = 0.2),
                       edge = ej,
-                      layout = "linear", circular = circular, sort.by = vatt) #+
-      # scale_color_distiller(palette = palette, direction = direction) 
+                      layout = "linear", circular = circular, sort.by = vatt)
   }
-  # if (!is.null(modifier)) {
-  #   f <- modifier(f)
-  # }
-  f
-}
-
-#' Return a function that calculates the bimodality index of some vertex attribute
-#' over a Mapper graph
-#'
-#' @param vatt string, name of the vertex attribute
-#'
-#' @return a function that takes a tbl_graph as its argument
-#' @export
-#'
-#' @examples
-vertex.bimodality <- function(vatt) {
-  function(tbl_graph) {
-    v <- tbl_graph %>%
-      activate(nodes) %>%
-      as.data.frame %>%
-      select(vatt) %>%
-      t %>%
-      as.matrix # 1-row matrix
-    # if all 0 and 1 Mclust in BI calc will fail
-    if (all(v[1,] == 0 | v[1,] == 1)) {
-      # v[1,] <- v[1,] + runif(ncol(v)) * 0.00001* (max(v[1,] - min(v[1,]))) # salt
-      bi <- NA_real_
-    } else {
-      result <- bimodalIndex(v, verbose = FALSE)
-      bi <- result$BI
-    }
-    bi
-  }
-}
-
-batch.bi <- function(subsets, fn, idcol = "id") {
-  x <- lapply(subsets, function(l) {
-    f2 <- function(l) fn(l$graph)
-    reps <- sapply(l, f2)
-    data.frame(rep = seq_along(reps), bi = reps)
-  })
-  rbindlist(x, idcol = idcol)
-}
-
-plot.bi.validation <- function(bis, bi.0) {
-  ggplot(bis, aes(x = r, y = bi)) +
-    stat_summary(fun.data = mean_se) +
-    geom_hline(yintercept = bi.0, color = "blue") +
-    labs(x = "downsampling ratio", y = "bimodal index") +
-    theme_cowplot()
 }
 
 #' Plot downsampled Mapper graphs in a grid
@@ -184,13 +139,13 @@ plot.bi.validation <- function(bis, bi.0) {
 batch.plot <- function(subsets, fn) {
   pl <- lapply(subsets, function(l) {
     plots <- lapply(l, function(mpr) {
-      fn(mpr$graph) 
+      fn(mpr$graph)
     })
     # get legend
     legend <- get_legend(plots[[1]])
     # delete legends and "subplotify"
     plots <- lapply(plots, function(p) {
-      p +  theme(legend.position = "None", 
+      p +  theme(legend.position = "None",
                  plot.margin = unit(c(10, 10, 10, 10), "points"))
     })
     viz <- plot_grid(plotlist = plots, nrow = 2)
@@ -198,6 +153,16 @@ batch.plot <- function(subsets, fn) {
   })
 }
 
+#' Write the Mapper graph and vertex data to files
+#'
+#' @param tbl_graph  a `tbl_graph` representing a Mapper graph
+#' @param v2p        a `data.frame` representing vertex attributes
+#' @param directory  target directory
+#'
+#' @return
+#' @export
+#'
+#' @examples
 write.graph <- function(tbl_graph, v2p, directory) {
   if (!dir.exists(directory)) {
     dir.create(directory, recursive = TRUE)
@@ -214,13 +179,22 @@ write.graph <- function(tbl_graph, v2p, directory) {
   fwrite(v2p, paste0(directory, "/vertices-to-points.txt"), sep = "\t")
 }
 
+#' Print the grid plot of downsampled Mapper graphs to file
+#'
+#' @param fn
+#' @param plt
+#'
+#' @return
+#' @export
+#'
+#' @examples
 write.validation.plot <- function(fn, plt) {
   save_plot(fn, plt, ncol = 1, base_width = 8, base_height = 6)
 }
 
 # cholera -----------------------------------------------------------------
 
-source("../r/load_cholera_data.R")
+source("load_cholera_data.R")
 
 gordon[, freq := count / sum(count), by = sample]
 gordon.samples <- unique(gordon[, .(sample, subject, diagnosis, id, hour)])
@@ -283,36 +257,28 @@ mpr <- cholera.mapper(js.dist, gordon.samples, ftr)
 plot.fstate <- function(graf, ...) {
   plot.mapper.graph(graf,
                     node = geom_node_point(aes(color = f.state, size = size)),
-                    ...) 
+                    ...)
 }
-
 plot.fstate(mpr$graph, seed = 1)
 
 # validate
 subsets <- validate(js.dist, gordon.samples, cholera.mapper, rs, nrep)
-# fstate.bi <- vertex.bimodality("f.state")
-# bi.0 <- fstate.bi(mpr$graph)
-# bis <- batch.bi(subsets, fstate.bi, "r")
-# bis[, r := rs[r]]
-# pcholera.bi <- plot.bi.validation(bis, bi.0)
-# pcholera.bi
-
-# mod <- function(g) {
-#   g + 
-#     labs(color = "fraction\ndiarrhea") + 
-#   scale_color_distiller(palette = "Spectral", values = c(0, 0.5, 1))
-# }
-plot.fstate.linear <- plot.mapper.linear("f.state")
-p2 <- function(g) {
-  plot.fstate.linear(g) +
-    labs(color = "fraction\ndiarrhea") +  
+plot.fstate.valid <- function(g) {
+  f <- plot.mapper.linear("f.state")
+  f(g) + labs(color = "fraction\ndiarrhea") +
     scale_color_distiller(palette = "Spectral", values = c(0, 0.5, 1))
-    
 }
-pl <- batch.plot(subsets, p2)
+# plot.fstate.linear <- plot.mapper.linear("f.state")
+# p2 <- function(g) {
+#   plot.fstate.linear(g) +
+#     labs(color = "fraction\ndiarrhea") +
+#     scale_color_distiller(palette = "Spectral", values = c(0, 0.5, 1))
+#
+# }
+pl <- batch.plot(subsets, plot.fstate.valid)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 pl.cholera.validate <- last_plot()
-write.validation.plot('../../figures/tda/paper/sup_fig1.pdf', last_plot())
+write.validation.plot(paste0(figs.dir, 'sup_fig1.pdf'), last_plot())
 
 # assign minima and basins
 mpr$graph <- mpr$graph %>% mutate(scaled.knn = mean.knn / size)
@@ -329,7 +295,7 @@ write.graph(mpr$graph, mpr$map[, .(point.name, vertex)],
 # david -------------------------------------------------------------------
 
 
-source(paste0(scripts.dir, "load_david_data.R"))
+source("load_david_data.R")
 samples <- unique(david[, .(sample, subject, day)])
 samples[, day := as.numeric(day)]
 jsd.file <- paste0(jsd.dir, "david.txt")
@@ -386,7 +352,7 @@ mpr <- david.mapper(js.dist, samples, ftr)
 
 plot.fsubject <- function(graf) {
   plot.mapper.graph(graf,
-                    node = geom_node_point(aes(color = f.subject, size = size))) 
+                    node = geom_node_point(aes(color = f.subject, size = size)))
 }
 
 # validate
@@ -401,14 +367,14 @@ subsets <- validate(js.dist, samples, david.mapper, rs, nrep)
 plot.fsubject.linear <- plot.mapper.linear("f.subject")
 p2 <- function(g) {
   plot.fsubject.linear(g) +
-    labs(color = "fraction\nsubject A") +  
+    labs(color = "fraction\nsubject A") +
     scale_color_distiller(palette = "Spectral", values = c(0, 0.5, 1))
-    
+
 }
 pl <- batch.plot(subsets, p2)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 pl.david.validate <- last_plot()
-write.validation.plot('../../figures/tda/paper/sup_fig2.pdf', last_plot())
+write.validation.plot(paste0(figs.dir, 'sup_fig2.pdf'), last_plot())
 
 #' Find basins of attraction:
 mpr$graph <- mpr$graph %>%
@@ -438,7 +404,7 @@ month.2.phase <- function(month) {
   (month - 3) %% 12 / 12
 }
 
-source(paste0(scripts.dir, "load-prochlorococcus-data.R"))
+source("load-prochlorococcus-data.R")
 jsds <- fread(paste0(jsd.dir, "prochlorococcus.txt"))
 jsds[, distance := sqrt(jsd)]
 dist.mat <- reshape2::acast(jsds, sample.x ~ sample.y, value.var = "distance")
@@ -486,7 +452,7 @@ plot.depth <- function(graf) {
   plot.mapper.graph(graf,
                     node = geom_node_point(aes(color = mean.depth, size = size)),
                     exclude.singletons = TRUE,
-                    seed = 0) 
+                    seed = 0)
 }
 
 plot.depth(mpr$graph)
@@ -496,15 +462,15 @@ subsets <- validate(dist.mat, samples, proc.mapper, rs, nrep)
 plot.depth.linear <- plot.mapper.linear("mean.depth")
 p2 <- function(g) {
   plot.depth.linear(g) +
-    labs(color = "m") +  
-    scale_color_distiller(palette = "Blues", direction = 1, 
+    labs(color = "m") +
+    scale_color_distiller(palette = "Blues", direction = 1,
                           values = c(1, 50, 100, 150, 200)) +
     guides(color = guide_colorbar(reverse = TRUE))
 }
 pl <- batch.plot(subsets, p2)
 plot_grid(plotlist = pl, ncol = 1, labels = rs)
 pl.proc.validate <- last_plot()
-write.validation.plot('../../figures/tda/paper/sup_fig3.pdf', last_plot())
+write.validation.plot(paste0(figs.dir, 'sup_fig3.pdf'), last_plot())
 
 mpr$graph <- assign.basins(mpr$graph, "scaled.knn", ignore.singletons = TRUE)
 mpr$graph <- mpr$graph %>%
@@ -514,172 +480,3 @@ mpr$graph <- mutate(mpr$graph, basin = nullify(in.singleton, basin))
 write.graph(mpr$graph, mpr$map[, .(point.name, vertex)],
             paste0(output.dir, "prochlorococcus/"))
 
-
-# nahant ------------------------------------------------------------------
-
-
-source(paste0(scripts.dir, "load-nahant-data.R"))
-
-nahant <- nahant[!is.na(kingdom)]
-nahant[, freq := value / sum(value), by = .(kingdom, day)]
-
-# jsds
-jsds <- c(Bacteria = "Bacteria", Eukaryota = "Eukaryota") %>%
-  lapply(function(k) {
-    fn <- paste0("jsds/nahant-", k, ".txt")
-    d <- fread(fn)
-    m <- dcast(d, day.i ~ day.j, value.var = "jsd")
-    rn <- m$day.i
-    m <- as.matrix(m[, -1])
-    rownames(m) <- rn
-    m
-})
-distances <- lapply(jsds, sqrt)
-
-#' 2D MDS is lossy, but suggests existence of 2 bacterial and 2-3 eukaryotic
-#' states:
-mds <- lapply(distances, cmdscale, eig = TRUE)
-for (x in mds) {
-  print(x$GOF)
-  plot(x$points, asp = 1)
-}
-rk.mds <- lapply(mds, function(x) {
-  pts <- x$points
-  apply(pts, 2, rank, ties.method = "first")
-})
-for (x in rk.mds) {
-  plot(x, asp = 1)
-}
-
-# mapper call
-bn <- 10
-en <- 5
-ni <- list(c(bn, bn), c(en, en))
-po <- list(70, 70)
-bb <- 10
-eb <- 20
-nbin <- list(bb, eb)
-mpr <- mapply(function(distance, rk.mds, po, ni, nb) {
-  mapper2D(distance, list(rk.mds[, 1], rk.mds[, 2]), num_intervals = ni,
-           percent_overlap = po, num_bins_when_clustering = nb)
-}, distance = distances, rk.mds = rk.mds, ni = ni, po = po, nb = nbin,
-SIMPLIFY = FALSE)
-summaries <- lapply(mpr, summary, plot = TRUE)
-plot_grid(plotlist = summaries, ncol = 2, labels = names(summaries), align = "h")
-
-# make graphs
-grafs <- lapply(mpr, mapper.2.igraph) %>%
-  lapply(as_tbl_graph)
-
-# map vertices to days
-v2p <- lapply(mpr, function(x) {
-  dt <- vertex.2.points(x$points_in_vertex)
-  setnames(dt, "point.name", "day")
-  dt[, day := as.numeric(day)]
-  dt
-})
-
-# summary statistics for vertices
-knn <- lapply(distances, function(d) {
-  k <- round(nrow(d) / 10)
-  v <- apply(d, 1, k.first, k = k)
-  data.table(day = as.numeric(names(v)), kNN = v)
-})
-v2p <- mapply(merge, x = v2p, y = knn, MoreArgs = list(by = "day"),
-              SIMPLIFY = FALSE)
-vertices <- lapply(v2p, function(dt) {
-  dt[, .(mean.day = mean(day), mean.knn = mean(kNN), size = .N), by = vertex]
-})
-grafs <- mapply(function(g, d) {
-  d$name <- paste0("v", d$vertex)
-  g %>%
-    activate(nodes) %>%
-    left_join(d, by = "name") %>%
-    mutate(scaled.knn = mean.knn / size)
-}, g = grafs, d = vertices, SIMPLIFY = FALSE)
-set.seed(0)
-pl <- lapply(grafs, function(g) {
-  ggraph(g, "fr") +
-    geom_edge_link0() +
-    geom_node_point(aes(size = size, fill = mean.day), shape = 21) +
-    scale_fill_distiller(palette = "Spectral") +
-    theme_graph(base_family = "Helvetica") +
-    theme(aspect.ratio = 1)
-})
-plot_grid(plotlist = pl, labels = names(pl))
-
-# knn and basins
-grafs <- lapply(grafs, assign.basins, fn = "scaled.knn", ignore.singletons = TRUE)
-grafs <- lapply(grafs, function(g) {
-  g %>% activate(nodes) %>% mutate(basin = as.factor(basin))
-})
-grafs <- mapply(function(graf, v2p) {
-  comps <- components(graf)
-  graf %>%
-    activate(nodes) %>%
-    mutate(in.singleton = in.singleton(v2p$day, v2p$vertex, comps$membership)) %>%
-    mutate(basin = nullify(in.singleton, basin)) %>%
-    mutate(basin = as.factor(basin))
-}, graf = grafs, v2p = v2p, SIMPLIFY = FALSE)
-set.seed(0)
-layouts <- lapply(grafs, create_layout, layout = "fr")
-pl <- mapply(function(g, lo) {
-  ggraph(g, "manual", node.positions = lo[, c("x", "y")]) +
-    geom_edge_link0() +
-    geom_node_point(aes(size = size, fill = basin), shape = 21) +
-    theme_graph(base_family = "Helvetica") +
-    theme(aspect.ratio = 1)
-}, g = grafs, lo = layouts, SIMPLIFY = FALSE)
-plot_grid(plotlist = pl, labels = names(pl))
-
-# save
-dirs <- list(paste0(output.dir, "nahant/bacteria/"),
-             paste0(output.dir, "nahant/eukaryotes/"))
-mapply(write.graph, tbl_graph = grafs,
-       v2p = lapply(v2p, function(d) d[, .(point.name = day, vertex)]),
-       directory = dirs)
-
-# sketch for downstream analyses
-for (d in v2p) setkey(d, day)
-map <- merge(v2p$Bacteria, v2p$Eukaryota, suffixes = paste0(".", names(v2p)),
-             allow.cartesian = TRUE) %>%
-  .[, .(vertex.Bacteria = paste0("Bacteria", vertex.Bacteria),
-        vertex.Eukaryota = paste0("Eukaryota", vertex.Eukaryota))] %>%
-  unique
-
-# rename vertices to merge graphs
-grafs <- mapply(function(g, k) {
-  mutate(g, name = paste0(k, vertex), basin = paste0(k, basin), type = k)
-}, g = grafs, k = names(grafs), SIMPLIFY = FALSE)
-
-# offset the euk vertices
-delx <- 2 * max(layouts$Bacteria$x) - min(layouts$Bacteria$x)
-merged.layout <- layouts$Eukaryota %>%
-  mutate(x = x + delx) %>%
-  rbind(layouts$Bacteria)
-merged.graf <- graph_join(grafs$Eukaryota, grafs$Bacteria)
-merged.graf <- merged.graf %>%
-  activate(edges) %>%
-  mutate(original = TRUE)
-for (i in seq(nrow(map))) {
-  merged.graf <- merged.graf +
-    edge(map[i,]$vertex.Bacteria, map[i,]$vertex.Eukaryota, original = FALSE)
-}
-merged.graf <- as_tbl_graph(merged.graf)
-merged.graf <- activate(merged.graf, nodes) %>%
-  arrange(type, basin, -size)
-ggraph(merged.graf, "linear", circular = TRUE) +
-  geom_edge_link0(data = function(d) filter(get_edges()(d), original == FALSE),
-                  alpha = 0.1) +
-  geom_node_point(aes(size = size, shape = type, color = basin)) +
-  theme_graph(base_family = "Helvetica") +
-  theme(aspect.ratio = 1)
-
-# connectivity table btwn bac and euk basins
-graf.df <- lapply(grafs, as.data.frame)
-map <- merge(map, graf.df$Bacteria, by.x = "vertex.Bacteria", by.y = "name")
-map <- merge(map, graf.df$Eukaryota, by.x = "vertex.Eukaryota", by.y = "name",
-             suffixes = paste0(".", names(grafs)))
-ggplot(map, aes(x = basin.Bacteria, y = basin.Eukaryota)) +
-  stat_bin_2d() +
-  coord_equal()
