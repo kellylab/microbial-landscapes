@@ -4,5 +4,5 @@
 *.Rproj
 *.RData
 *.Rhistory
-*figures/
+*figures/*
 *.DS_Store
