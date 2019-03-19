@@ -23,7 +23,7 @@ Analysis of persistent states and state transitions in microbial communities fro
 Installing required R packages:
 
 ```r
-install.packages(c("cowplot", "data.table", "ggraph", "igraph", "philentropy", "tidygraph", tidyverse"))
+install.packages(c("cowplot", "data.table", "ggraph", "igraph", "philentropy", "tidygraph", "tidyverse"))
 devtools::install_github("wkc1986/TDAmapper")
 ```
 
