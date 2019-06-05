@@ -42,6 +42,7 @@ read_prochloro <- function(path) {
     dt
 }
 
+data.dir <- "../data/"
 prochlorococcus <- c(bats = "bats_orig.txt", hot = "hot_orig.txt") %>%
   sapply(function(fn, root) paste0(root, fn), root = data.dir) %>%
   lapply(read_prochloro) %>%

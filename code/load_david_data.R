@@ -1,5 +1,6 @@
 library(data.table)
 
+data.dir <- "../data/"
 david <- fread(paste0(data.dir, "david/david.otus"),
                col.names = c("sample", "otu", "count")
                )

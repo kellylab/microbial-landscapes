@@ -27,6 +27,20 @@ install.packages(c("cowplot", "data.table", "ggraph", "igraph", "philentropy", "
 devtools::install_github("wkc1986/TDAmapper")
 ```
 
+## Running
+
+Tested from the [RStudio](http://rstudio.com) console on macOS:
+
+```r
+# from the repository root directory:
+setwd("code/")
+source("make-jsds.R")
+source("make-mapper-graphs.R")
+source("fig_cholera.R")
+source("fig_david.R")
+source("fig_prochlorococcus.R")
+```
+
 
 ## References
 
