@@ -464,7 +464,7 @@ p2 <- function(g) {
   plot.depth.linear(g) +
     labs(color = "m") +
     scale_color_distiller(palette = "Blues", direction = 1,
-                          values = c(1, 50, 100, 150, 200)) +
+                          values = scales::rescale(c(1, 50, 100, 150, 200))) +
     guides(color = guide_colorbar(reverse = TRUE))
 }
 pl <- batch.plot(subsets, p2)
