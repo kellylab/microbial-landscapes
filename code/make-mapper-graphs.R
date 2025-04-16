@@ -112,7 +112,7 @@ validate <- function(dist, dt, fn, rs, nrep) {
 #' @export
 #'
 #' @examples
-plot.mapper.linear <- function(vatt, circular = TRUE) {
+plot.mapper.linear <- function(vatt, circular = TRUE, ...) {
   if (circular) {
     ej <- geom_edge_density(fill = "black")
   } else {
@@ -123,7 +123,8 @@ plot.mapper.linear <- function(vatt, circular = TRUE) {
                       node = geom_node_point(aes_string(color = vatt),
                                              size = 0.2),
                       edge = ej,
-                      layout = "linear", circular = circular, sort.by = vatt)
+                      # layout = "linear", circular = circular, sort.by = bquote(vatt))
+                      layout = "linear", circular = circular, ...)
   }
 }
 
@@ -264,7 +265,7 @@ plot.fstate(mpr$graph, seed = 1)
 # validate
 subsets <- validate(js.dist, gordon.samples, cholera.mapper, rs, nrep)
 plot.fstate.valid <- function(g) {
-  f <- plot.mapper.linear("f.state")
+  f <- plot.mapper.linear("f.state", sort.by = f.state)
   f(g) + labs(color = "fraction\ndiarrhea") +
     scale_color_distiller(palette = "Spectral", values = c(0, 0.5, 1))
 }
@@ -304,8 +305,11 @@ if (!file.exists(jsd.file)) {
   source("make-jsds-david.R")
 }
 jsds <- fread(jsd.file)
-js.dist <- reshape2::acast(jsds, sample.x ~ sample.y, value.var = "jsd") %>%
-  sqrt
+js.dist <- dcast(jsds, sample.x ~ sample.y, value.var = "jsd")
+sx <- js.dist$sample.x
+js.dist[, sample.x := NULL]
+js.dist <- as.matrix(js.dist)
+rownames(js.dist) <- sx
 k <- round(nrow(samples) / 10) # calculate k nearest neighbors
 kNN <- dist2knn(js.dist, k)
 samples[, kNN := kNN[sample]]
@@ -364,7 +368,7 @@ subsets <- validate(js.dist, samples, david.mapper, rs, nrep)
 # pdavid.bi <- plot.bi.validation(bis, bi.0)
 # pdavid.bi
 
-plot.fsubject.linear <- plot.mapper.linear("f.subject")
+plot.fsubject.linear <- plot.mapper.linear("f.subject", sort.by = f.subject)
 p2 <- function(g) {
   plot.fsubject.linear(g) +
     labs(color = "fraction\nsubject A") +
@@ -407,7 +411,12 @@ month.2.phase <- function(month) {
 source("load-prochlorococcus-data.R")
 jsds <- fread(paste0(jsd.dir, "prochlorococcus.txt"))
 jsds[, distance := sqrt(jsd)]
-dist.mat <- reshape2::acast(jsds, sample.x ~ sample.y, value.var = "distance")
+# dist.mat <- reshape2::acast(jsds, sample.x ~ sample.y, value.var = "distance")
+dist.mat <- dcast(jsds, sample.x ~ sample.y, value.var = "distance")
+sx <- dist.mat$sample.x
+dist.mat[, sample.x := NULL]
+dist.mat <- as.matrix(dist.mat)
+rownames(dist.mat) <- sx
 samples <- unique(prochlorococcus[, -c("ecotype", "abundance")])
 samples[, phase := month.2.phase(cal.month)]
 k <- floor(nrow(samples) / 10)
@@ -459,7 +468,7 @@ plot.depth(mpr$graph)
 
 # validate
 subsets <- validate(dist.mat, samples, proc.mapper, rs, nrep)
-plot.depth.linear <- plot.mapper.linear("mean.depth")
+plot.depth.linear <- plot.mapper.linear("mean.depth", sort.by = mean.depth)
 p2 <- function(g) {
   plot.depth.linear(g) +
     labs(color = "m") +

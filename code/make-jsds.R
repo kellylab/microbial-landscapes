@@ -28,7 +28,8 @@ distribs <- as.matrix(distribs[, -1])
 jsd <- JSD(distribs)
 rownames(jsd) <- sample.names
 colnames(jsd) <- sample.names
-jsd <- melt(jsd, varnames = c("sample.x", "sample.y"),
+jsd <- as.data.table(jsd, keep.rownames = "sample.x")
+jsd <- melt(jsd, id.vars = "sample.x", variable.name= "sample.y",
             value.name = "jsd")
 
 fwrite(jsd, paste0(out.dir, "/cholera.txt"), sep = "\t")
@@ -50,7 +51,9 @@ rownames(jsd) <- sample.names
 colnames(jsd) <- sample.names
 
 # format and write
-jsd <- melt(jsd, varnames = c("sample.x", "sample.y"), value.name = "jsd")
+jsd <- as.data.table(jsd, keep.rownames = "sample.x")
+jsd <- melt(jsd, id.vars = "sample.x", variable.name= "sample.y",
+            value.name = "jsd")
 fwrite(jsd, paste0(out.dir, "/david.txt"), sep = "\t")
 
 
@@ -68,6 +71,7 @@ samples <- distribs[, sample]
 jsds <- JSD(as.matrix(distribs[, -1]))
 rownames(jsds) <- samples
 colnames(jsds) <- samples
-jsds <- as.data.table(melt(jsds, varnames = c("sample.x", "sample.y"),
-                           value.name = "jsd"))
+jsds <- as.data.table(jsds, keep.rownames = "sample.x")
+jsds <- melt(jsds, id.vars = "sample.x", variable.name= "sample.y",
+            value.name = "jsd")
 fwrite(jsds, paste0(out.dir, "/prochlorococcus.txt"), sep = "\t")
